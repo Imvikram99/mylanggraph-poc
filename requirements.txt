@@ -3,6 +3,7 @@ langchain>=0.2.9
 langchain-core>=0.2.24
 langchain-community>=0.2.11
 langchain-openai>=0.1.15
+langchain-text-splitters>=0.0.2
 langsmith>=0.1.77
 qdrant-client>=1.9.0
 chromadb>=0.5.3

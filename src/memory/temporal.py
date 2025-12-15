@@ -75,10 +75,24 @@ class TemporalMemoryStore:
     def _build_embeddings(self):
         if OpenAIEmbeddings is None:
             return None
+        provider = os.getenv("EMBEDDING_PROVIDER", "openrouter").lower()
+        model = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-large")
+        if provider == "openrouter":
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            api_base = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
+        else:
+            api_key = os.getenv("OPENAI_API_KEY")
+            api_base = os.getenv("OPENAI_API_BASE")
+        if not api_key:
+            console.log("[yellow]No embedding API key configured; falling back to keyword similarity[/]")
+            return None
+        kwargs = {"model": model, "openai_api_key": api_key}
+        if api_base:
+            kwargs["openai_api_base"] = api_base
         try:
-            return OpenAIEmbeddings()
-        except Exception:
-            console.log("[yellow]OpenAI embeddings unavailable, falling back to keyword similarity[/]")
+            return OpenAIEmbeddings(**kwargs)
+        except Exception as exc:
+            console.log(f"[yellow]Embedding client init failed ({exc}); using keyword similarity[/]")
             return None
 
     # --------------------- write ---------------------

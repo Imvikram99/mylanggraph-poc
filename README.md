@@ -112,9 +112,10 @@ docker run -d --name qdrant \
 Stop with `docker stop qdrant` when done.
 
 **Key environment variables (`.env.example`)**
-- `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY` (fallback router path)
+- `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` + `OPENROUTER_BASE` (default provider)
+- `OPENAI_API_KEY` / `AZURE_OPENAI_API_KEY` (optional fallbacks), `ANTHROPIC_API_KEY`
 - `LANGCHAIN_TRACING_V2=true` to enable LangSmith dashboards
+- `MODEL_PROVIDER` (`openrouter` by default) and `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`
 - `VECTOR_DB_PATH=./data/memory/vectorstore` (fallback) and `QDRANT_COLLECTION=langgraph_memories`
 - `MCP_SERVER_REGISTRY=./configs/mcp_tools.yaml`
 - `QDRANT_URL=http://localhost:6333` and `QDRANT_API_KEY=` (blank for local)
@@ -128,7 +129,8 @@ python -m src.runner --scenario demo/rag_qa.yaml
 Expected: console logs showing router decision, retrieval hits, skill invocations, and a final synthesized answer stored under `data/trajectories/latest.json`.
 
 ## Configuration
-- **Model providers**: defined in `configs/models.yaml`. Choose `openai`, `azure_openai`, or `ollama`. Override via env vars (`MODEL_PROVIDER=openai`, `OPENAI_MODEL=gpt-4o-mini`).
+- **Model providers**: defined in `configs/models.yaml`. Default is `openrouter` (`OPENROUTER_MODEL`, `OPENROUTER_BASE`), but you can switch via `MODEL_PROVIDER=openai|anthropic|ollama` and associated env vars.
+- **Embedding provider**: `EMBEDDING_PROVIDER` toggles between OpenRouter’s OpenAI-compatible embeddings and native OpenAI. Control model via `EMBEDDING_MODEL`.
 - **Vector DB**: default Qdrant (Docker). Configure via `QDRANT_URL`, `QDRANT_API_KEY`, and `VECTOR_DB_COLLECTION`. To fall back to embedded Chroma, set `VECTOR_DB_IMPL=chroma`. `scripts/ingest.py` rebuilds embeddings regardless of backend.
 - **Memory backend**: short-term uses LangGraph SQLite checkpointer at `data/memory/checkpointer.sqlite`. Long-term uses Qdrant with timestamped metadata + decay-aware reranking. Tune behavior via `MEMORY_TIME_WINDOW_DAYS`, `MEMORY_DECAY_HALF_LIFE_HOURS`, `MEMORY_TOP_K`, `MEMORY_TTL_TASK_DAYS`.
 - **MCP config**: `configs/mcp_tools.yaml` lists MCP servers (filesystem, Jira, custom HTTP). Enable/disable by commenting entries or overriding `MCP_ENABLED=false`. `src/integrations/mcp_client.py` handles registration per run.

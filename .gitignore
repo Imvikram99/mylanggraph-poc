@@ -1,0 +1,9 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+data/qdrant/
+data/memory/checkpointer.sqlite
+data/trajectories/*.json
+data/memory/vectorstore/memories.jsonl
