@@ -1,0 +1,13 @@
+packs:
+  research_pack:
+    description: "Web + knowledge base research utilities"
+    module: "skills.research_pack.tools"
+    tools: ["web_search", "summarize_notes"]
+  report_pack:
+    description: "Formatting + writing helpers"
+    module: "skills.report_pack.tools"
+    tools: ["draft_outline", "format_report"]
+  ops_pack:
+    description: "Operational automation (planned)"
+    module: "skills.ops_pack.tools"
+    tools: []

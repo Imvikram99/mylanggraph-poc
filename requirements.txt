@@ -1,0 +1,17 @@
+langgraph>=0.2.10
+langchain>=0.2.9
+langchain-core>=0.2.24
+langchain-community>=0.2.11
+langchain-openai>=0.1.15
+langsmith>=0.1.77
+qdrant-client>=1.9.0
+chromadb>=0.5.3
+pyyaml>=6.0.1
+pydantic>=2.8.2
+python-dotenv>=1.0.1
+tqdm>=4.66.4
+typer>=0.12.3
+rich>=13.7.1
+networkx>=3.3
+aiohttp>=3.9.5
+tenacity>=8.4.2

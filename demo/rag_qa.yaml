@@ -1,0 +1,5 @@
+prompt: >
+  Summarize the LangGraph memory strategy in three concise bullets.
+context:
+  persona: researcher
+  mode: rag

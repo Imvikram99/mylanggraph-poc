@@ -1,0 +1,5 @@
+prompt: >
+  Explain how the research and writer agents collaborate within this POC.
+context:
+  persona: writer
+  mode: graphrag

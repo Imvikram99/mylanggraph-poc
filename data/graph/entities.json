@@ -1,0 +1,4 @@
+[
+  {"source": "Research Agent", "target": "Writer Agent", "relation": "handoff"},
+  {"source": "Writer Agent", "target": "Swarm Coordinator", "relation": "reports_to"}
+]

@@ -1,0 +1,18 @@
+servers:
+  filesystem:
+    type: builtin
+    enabled: true
+    params:
+      root: ./data/knowledge_base
+  jira:
+    type: http
+    enabled: false
+    params:
+      base_url: https://jira.example.com
+      token_env: JIRA_API_TOKEN
+  github:
+    type: http
+    enabled: false
+    params:
+      base_url: https://api.github.com
+      token_env: GITHUB_TOKEN
