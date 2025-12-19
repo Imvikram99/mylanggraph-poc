@@ -6,6 +6,8 @@ from typing import Any, Dict, List
 
 from rich.console import Console
 
+from ..messages import append_message
+
 console = Console()
 
 
@@ -24,5 +26,5 @@ class SwarmNode:
         summary = "\n".join(plan + worker_outputs)
         console.log(f"[blue]Swarm[/] planner={self.planner} workers={self.workers}")
         state["output"] = summary
-        state.setdefault("messages", []).append({"role": "assistant", "content": summary})
+        append_message(state, "assistant", summary)
         return state

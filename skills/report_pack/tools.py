@@ -6,15 +6,24 @@ from typing import List
 
 
 def draft_outline(topic: str) -> List[str]:
-    """Produce a lightweight outline for the requested topic."""
+    """Produce a multi-section outline for the requested topic."""
+    topic = topic.strip() or "the requested topic"
     return [
-        f"Introduction to {topic}",
-        f"Key considerations for {topic}",
-        f"Conclusion and next steps for {topic}",
+        f"Executive overview of {topic}",
+        f"Problem statement and context for {topic}",
+        f"Opportunities / risks related to {topic}",
+        f"Implementation considerations for {topic}",
+        f"Next steps and owner for {topic}",
     ]
 
 
 def format_report(sections: List[str]) -> str:
     """Return a formatted markdown report from outline sections."""
-    lines = [f"## {idx+1}. {title}" for idx, title in enumerate(sections)]
+    lines = []
+    for idx, title in enumerate(sections, start=1):
+        body = (
+            f"Details for **{title}** go here. Summaries can include bullet lists, KPIs, or action items "
+            "produced by upstream tools."
+        )
+        lines.append(f"## {idx}. {title}\n\n{body}")
     return "\n\n".join(lines)

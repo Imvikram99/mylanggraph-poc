@@ -16,3 +16,41 @@ providers:
 embedding:
   provider: ${EMBEDDING_PROVIDER:-openrouter}
   model: ${EMBEDDING_MODEL:-openai/text-embedding-3-large}
+
+models:
+  - name: openrouter/gpt-4o-mini
+    provider: openrouter
+    style: prompt
+    cost_per_1k: 0.0020
+    latency_ms: 1200
+    privacy: shared
+  - name: anthropic/claude-3-sonnet
+    provider: anthropic
+    style: prompt
+    cost_per_1k: 0.0030
+    latency_ms: 1500
+    privacy: enterprise
+  - name: openrouter/deepseek-coder-v2
+    provider: openrouter
+    style: rag
+    cost_per_1k: 0.0012
+    latency_ms: 900
+    privacy: shared
+
+policies:
+  default: balanced
+  presets:
+    balanced:
+      description: "Default trade-off between accuracy, cost, and latency."
+      boost: 0.0
+    cost_sensitive:
+      preferred_route: "rag"
+      disable_routes: ["hybrid", "swarm"]
+      boost: 0.2
+    latency_sensitive:
+      preferred_route: "skills"
+      disable_routes: ["swarm"]
+      boost: 0.25
+    accuracy_first:
+      preferred_route: "hybrid"
+      boost: 0.2

@@ -1,0 +1,13 @@
+tenants:
+  default:
+    rate_limit_rpm: 60
+    model_provider: openrouter
+    feature_flags:
+      agent_run: true
+      streaming: true
+  enterprise:
+    rate_limit_rpm: 20
+    model_provider: azure
+    feature_flags:
+      agent_run: true
+      streaming: false

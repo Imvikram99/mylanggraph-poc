@@ -1,0 +1,23 @@
+{
+  "datasets": [
+    {
+      "id": "kb_v1",
+      "path": "data/datasets/kb_v1/chunks.jsonl",
+      "created_at": "2025-12-19T03:36:43.611422+00:00",
+      "source_dir": "data/knowledge_base",
+      "stats": {
+        "documents": 1,
+        "chunks": 1,
+        "avg_tokens_per_doc": 38.0
+      },
+      "schema": {
+        "fields": [
+          "dataset_id",
+          "chunk_id",
+          "source_path",
+          "text"
+        ]
+      }
+    }
+  ]
+}

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Optional
 
 import typer
@@ -60,19 +62,15 @@ def _load_documents(root: Path, glob: str):
 def _persist_qdrant(documents, embeddings, collection_override: Optional[str]) -> None:
     client = QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333"), api_key=os.getenv("QDRANT_API_KEY") or None)
     collection_name = collection_override or os.getenv("QDRANT_COLLECTION", "langgraph_memories")
-    try:
-        client.get_collection(collection_name)
-    except Exception:
-        client.recreate_collection(
-            collection_name,
-            vectors_config=rest.VectorParams(size=1536, distance=rest.Distance.COSINE),
-        )
+    expected_dim = int(os.getenv("EMBEDDING_DIM", "3072"))
+    _ensure_collection(client, collection_name, expected_dim)
     vectors = [embeddings.embed_query(doc.page_content) for doc in documents]
     payloads = [
         {
             "text": doc.page_content,
             "source": doc.metadata.get("source"),
-            "ts": doc.metadata.get("ts"),
+            "ts": doc.metadata.get("ts") or datetime.now(timezone.utc).isoformat(),
+            "ts_epoch": doc.metadata.get("ts_epoch") or time.time(),
         }
         for doc in documents
     ]
@@ -109,6 +107,25 @@ def _build_embeddings():
     if api_base:
         kwargs["openai_api_base"] = api_base
     return OpenAIEmbeddings(**kwargs)
+
+
+def _ensure_collection(client: QdrantClient, name: str, dim: int) -> None:
+    def create():
+        client.create_collection(
+            name,
+            vectors_config=rest.VectorParams(size=dim, distance=rest.Distance.COSINE),
+        )
+
+    if not client.collection_exists(name):
+        create()
+        return
+
+    info = client.get_collection(name)
+    current_dim = getattr(getattr(info.config.params, "vectors", None), "size", None)
+    if current_dim and current_dim != dim:
+        typer.secho(f"Vector dim mismatch ({current_dim}!={dim}); recreating collection '{name}'.", fg=typer.colors.YELLOW)
+        client.delete_collection(name)
+        create()
 
 
 if __name__ == "__main__":

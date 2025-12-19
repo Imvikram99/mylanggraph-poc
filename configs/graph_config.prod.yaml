@@ -1,0 +1,31 @@
+defaults:
+  router_model: ${MODEL_PROVIDER:-openai}
+  router:
+    thresholds:
+      graph_rag: 0.55
+      swarm: 0.6
+  max_workers: 4
+  memory:
+    backend: ${VECTOR_DB_IMPL:-qdrant}
+    collection: ${QDRANT_COLLECTION:-langgraph_memories}
+    time_window_days: ${MEMORY_TIME_WINDOW_DAYS:-45}
+    decay_half_life_hours: ${MEMORY_DECAY_HALF_LIFE_HOURS:-96}
+    top_k: ${MEMORY_TOP_K:-10}
+    ttl_task_days: ${MEMORY_TTL_TASK_DAYS:-10}
+
+agents:
+  researcher:
+    skills: [research_pack]
+    fallback_agent: writer
+  writer:
+    skills: [report_pack]
+    fallback_agent: researcher
+  ops:
+    skills: [ops_pack]
+
+swarm:
+  planner: researcher
+  workers:
+    - researcher
+    - writer
+  aggregation: weighted_vote

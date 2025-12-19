@@ -6,6 +6,8 @@ from typing import Any, Dict
 
 from rich.console import Console
 
+from ..messages import append_message
+
 console = Console()
 
 
@@ -20,7 +22,7 @@ class HandoffNode:
         target = self._target_agent(current)
         console.log(f"[yellow]Handoff[/] {current} -> {target}")
         state.setdefault("metadata", {})["agent"] = target
-        state.setdefault("messages", []).append({"role": "system", "content": f"Handoff to {target} agent"})
+        append_message(state, "system", f"Handoff to {target} agent")
         state["output"] = f"Delegated work to {target}"
         return state
 

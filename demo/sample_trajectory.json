@@ -1,0 +1,6 @@
+{
+  "context": {"scenario_id": "sample"},
+  "route": "rag",
+  "output": "This is a safe summary referencing data.",
+  "artifacts": [{"text": "source snippet"}]
+}

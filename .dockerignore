@@ -1,0 +1,9 @@
+.venv
+__pycache__
+.git
+.github
+data/qdrant
+data/trajectories
+data/memory
+.history
+.lh

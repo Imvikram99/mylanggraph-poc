@@ -1,0 +1,10 @@
+tasks:
+  - name: summarization
+    description: "Business report summarization"
+    weight: 1.0
+  - name: retrieval_augmented
+    description: "RAG grounded Q&A"
+    weight: 1.2
+  - name: reasoning
+    description: "Multi-step reasoning with constraints"
+    weight: 1.5

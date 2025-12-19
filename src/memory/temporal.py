@@ -48,6 +48,7 @@ class TemporalMemoryStore:
         self.qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
         self.qdrant_api_key = os.getenv("QDRANT_API_KEY")
         self.collection = os.getenv("QDRANT_COLLECTION", "langgraph_memories")
+        self.embedding_dim = int(os.getenv("EMBEDDING_DIM", "3072"))
         self.local_path = Path(os.getenv("VECTOR_DB_PATH", "data/memory/vectorstore") + "/memories.jsonl")
         self.local_path.parent.mkdir(parents=True, exist_ok=True)
         self.top_k = int(os.getenv("MEMORY_TOP_K", "8"))
@@ -62,13 +63,22 @@ class TemporalMemoryStore:
         if QdrantClient is None:
             return None
         client = QdrantClient(url=self.qdrant_url, api_key=self.qdrant_api_key or None)
-        try:
-            client.get_collection(self.collection)
-        except Exception:
+        if not client.collection_exists(self.collection):
             console.log(f"[yellow]Creating Qdrant collection '{self.collection}'[/]")
-            client.recreate_collection(
+            client.create_collection(
                 self.collection,
-                vectors_config=rest.VectorParams(size=1536, distance=rest.Distance.COSINE),  # type: ignore[arg-type]
+                vectors_config=rest.VectorParams(size=self.embedding_dim, distance=rest.Distance.COSINE),  # type: ignore[arg-type]
+            )
+            return client
+
+        info = client.get_collection(self.collection)
+        current_dim = getattr(getattr(info.config.params, "vectors", None), "size", None)
+        if current_dim and current_dim != self.embedding_dim:
+            console.log(f"[yellow]Qdrant dim mismatch ({current_dim}!={self.embedding_dim}); recreating collection[/]")
+            client.delete_collection(self.collection)
+            client.create_collection(
+                self.collection,
+                vectors_config=rest.VectorParams(size=self.embedding_dim, distance=rest.Distance.COSINE),  # type: ignore[arg-type]
             )
         return client
 
@@ -105,7 +115,7 @@ class TemporalMemoryStore:
     def _write_qdrant(self, record: MemoryRecord) -> str:
         assert self._client is not None and rest is not None
         payload = self._payload(record)
-        vector = self._embeddings.embed_query(record.text) if self._embeddings else [0.0] * 1536
+        vector = self._embeddings.embed_query(record.text) if self._embeddings else [0.0] * self.embedding_dim
         point_id = str(uuid.uuid4())
         self._client.upsert(
             collection_name=self.collection,
@@ -121,12 +131,14 @@ class TemporalMemoryStore:
         return payload["id"]
 
     def _payload(self, record: MemoryRecord) -> Dict[str, Any]:
+        ts_epoch = record.timestamp.timestamp()
         return {
             "text": record.text,
             "category": record.category,
             "importance": record.importance,
             "source": record.source,
             "ts": record.timestamp.isoformat(),
+            "ts_epoch": ts_epoch,
             "metadata": record.metadata or {},
         }
 
@@ -143,22 +155,38 @@ class TemporalMemoryStore:
         since = now - timedelta(days=time_window_days or self.time_window_days)
         conditions = [
             rest.FieldCondition(
-                key="ts",
-                range=rest.Range(gte=since.isoformat()),
+                key="ts_epoch",
+                range=rest.Range(gte=since.timestamp()),
             )
         ]
-        search_result = self._client.search(
-            collection_name=self.collection,
-            query_vector=vector,
-            limit=top_k or self.top_k,
-            query_filter=rest.Filter(must=conditions),
-            with_payload=True,
-        )
+        query_filter = rest.Filter(must=conditions)
+        limit = top_k or self.top_k
+        if hasattr(self._client, "search"):
+            search_result = self._client.search(
+                collection_name=self.collection,
+                query_vector=vector,
+                limit=limit,
+                query_filter=query_filter,
+                with_payload=True,
+            )
+        else:
+            response = self._client.query_points(
+                collection_name=self.collection,
+                query=vector,
+                limit=limit,
+                query_filter=query_filter,
+                with_payload=True,
+            )
+            search_result = response.points
         scored = []
         for point in search_result:
             payload = point.payload or {}
-            ts_str = payload.get("ts", datetime.now(timezone.utc).isoformat())
-            ts = datetime.fromisoformat(ts_str)
+            ts_epoch = payload.get("ts_epoch")
+            if ts_epoch is None:
+                ts_str = payload.get("ts", datetime.now(timezone.utc).isoformat())
+                ts_epoch = datetime.fromisoformat(ts_str).timestamp()
+                payload["ts_epoch"] = ts_epoch
+            ts = datetime.fromtimestamp(float(ts_epoch), tz=timezone.utc)
             recency_bonus = self._recency_bonus(ts)
             final_score = (point.score or 0.0) + recency_bonus + float(payload.get("importance", 0))
             payload.update({"score": final_score})

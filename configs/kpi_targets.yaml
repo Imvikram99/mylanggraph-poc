@@ -1,0 +1,8 @@
+targets:
+  success_rate: 0.65
+  csat: 4.2
+  escalation_rate: 0.15
+weights:
+  relevance: 0.5
+  hallucination: 0.3
+  safety: 0.2

@@ -1,0 +1,5 @@
+prompt: "Act as an autonomous analyst and produce a plan for evaluating our memory strategy."
+context:
+  persona: researcher
+  mode: agentic
+  scenario_id: autonomous_analyst

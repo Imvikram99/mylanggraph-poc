@@ -10,4 +10,4 @@ packs:
   ops_pack:
     description: "Operational automation (planned)"
     module: "skills.ops_pack.tools"
-    tools: []
+    tools: ["file_ticket"]

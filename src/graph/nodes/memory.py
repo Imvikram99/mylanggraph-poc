@@ -8,6 +8,8 @@ from typing import Any, Dict, List
 
 from rich.console import Console
 
+from concurrent.futures import ThreadPoolExecutor
+
 from ...memory.temporal import MemoryRecord, TemporalMemoryStore
 
 console = Console()
@@ -36,6 +38,7 @@ class MemoryWriteNode:
     def __init__(self, store: TemporalMemoryStore) -> None:
         self.store = store
         self.enabled = os.getenv("ALLOW_MEMORY_WRITE", "true").lower() == "true"
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         if not self.enabled:
@@ -50,7 +53,7 @@ class MemoryWriteNode:
             source=state.get("metadata", {}).get("agent", "agent"),
             timestamp=datetime.now(timezone.utc),
         )
-        self.store.write(record)
+        self._executor.submit(self.store.write, record)
         return state
 
 
