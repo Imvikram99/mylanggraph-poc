@@ -25,16 +25,31 @@ class GovernanceLogger:
         pii = bool(PII_REGEX.search(output))
         toxic = any(word in output.lower() for word in TOXIC_KEYWORDS)
         adversarial_hits = self.tester.scan_output(output)
-        record = {
+        telemetry = ((state.get("metadata") or {}).get("telemetry") or {})
+        plan = state.get("plan") or {}
+        phases = plan.get("phases") or []
+        review_status = ((state.get("metadata") or {}).get("code_review") or {}).get("status")
+        base_record = {
             "scenario": state.get("context", {}).get("scenario_id"),
             "route": state.get("route"),
             "pii_detected": pii,
             "toxicity_detected": toxic,
             "jailbreak_detected": bool(adversarial_hits),
             "adversarial_hits": [hit["name"] for hit in adversarial_hits],
+            "cost_usd": telemetry.get("cost_estimate_usd"),
+            "latency_s": telemetry.get("latency_s"),
+            "review_status": review_status,
         }
+        records = []
+        if phases:
+            for phase in phases:
+                record = {**base_record, "phase": phase.get("name"), "owner": phase.get("owner")}
+                records.append(record)
+        else:
+            records.append({**base_record, "phase": state.get("workflow_phase")})
         with self.path.open("a", encoding="utf-8") as fout:
-            fout.write(json.dumps(record) + "\n")
+            for record in records:
+                fout.write(json.dumps(record) + "\n")
         return {
             "pii_detected": pii,
             "toxicity_detected": toxic,

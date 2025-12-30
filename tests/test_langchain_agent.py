@@ -7,3 +7,24 @@ def test_langchain_agent_returns_plan():
     result = node.run(state)
     assert "output" in result
     assert result["metadata"].get("langchain_agent") is not None
+
+
+def test_langchain_agent_handles_phases():
+    node = LangChainAgentNode()
+    state = {
+        "plan": {
+            "phases": [
+                {
+                    "name": "Design Hardening",
+                    "owner": "architect",
+                    "deliverables": ["Document architecture"],
+                    "acceptance": ["Scenario validation: demo/feature_request.yaml"],
+                }
+            ]
+        },
+        "messages": [{"role": "user", "content": "start"}],
+        "metadata": {},
+    }
+    result = node.run(state)
+    assert "Design Hardening" in result["output"]
+    assert result["workflow_phase"] == "execution"

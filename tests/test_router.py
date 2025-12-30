@@ -43,3 +43,14 @@ def test_router_can_force_hybrid_mode():
     )
     router.run(state)
     assert state["route"] == "hybrid"
+
+
+def test_router_detects_feature_workflow():
+    router = RouterNode({})
+    state = make_state(
+        "I need an architecture plan for a new feature request",
+        mode="architect",
+    )
+    router.run(state)
+    assert state["route"] == "workflow"
+    assert state["metadata"]["router_reason"] == "workflow_request"

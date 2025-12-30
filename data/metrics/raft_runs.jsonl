@@ -15,3 +15,38 @@
 {"ts": "2025-12-30T14:19:03.702047+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "score": 0.4}
 {"ts": "2025-12-30T14:19:04.081775+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
 {"ts": "2025-12-30T14:19:04.113767+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T14:27:41.277975+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T14:28:48.636557+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "score": 0.4}
+{"ts": "2025-12-30T14:28:49.023441+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T14:28:49.059345+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T14:33:05.185288+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:08:41.059453+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "score": 0.4}
+{"ts": "2025-12-30T15:08:41.249574+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:08:41.350064+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:09:39.567856+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "score": 0.4}
+{"ts": "2025-12-30T15:09:39.879059+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 0.6666666666666666, "completeness": 1.0, "score": 0.8}
+{"ts": "2025-12-30T15:09:40.005253+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:09:40.163183+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:20:18.574154+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "score": 0.4}
+{"ts": "2025-12-30T15:20:19.032448+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:20:19.164403+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:25:54.556950+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "score": 0.4}
+{"ts": "2025-12-30T15:25:54.949095+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:25:55.096709+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:25:55.358530+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:26:08.036541+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "score": 0.4}
+{"ts": "2025-12-30T15:26:08.605238+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:26:08.890431+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:26:09.479310+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:26:23.314207+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "score": 0.4}
+{"ts": "2025-12-30T15:26:24.260849+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:26:24.941844+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:26:26.294911+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "score": 1.0}
+{"ts": "2025-12-30T15:34:44.406831+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "score": 0.55}
+{"ts": "2025-12-30T15:34:45.923857+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "score": 0.9}
+{"ts": "2025-12-30T15:34:47.300709+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": null, "score": 0.9}
+{"ts": "2025-12-30T15:34:49.783955+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": null, "score": 0.9}
+{"ts": "2025-12-30T15:41:43.503262+00:00", "route": "langchain_agent", "scenario": "autonomous_analyst", "grounding": 0.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "reward_score": 0.0, "score": 0.45}
+{"ts": "2025-12-30T15:41:45.839529+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "reward_score": 0.0, "score": 0.75}
+{"ts": "2025-12-30T15:41:48.036087+00:00", "route": "rag", "scenario": "graphrag", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": null, "reward_score": 0.0, "score": 0.75}
+{"ts": "2025-12-30T15:41:51.739797+00:00", "route": "rag", "scenario": "rag_qa", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": null, "reward_score": 0.0, "score": 0.75}

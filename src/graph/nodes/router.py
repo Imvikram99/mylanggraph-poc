@@ -23,6 +23,7 @@ class RouterNode:
         "handoff": 0.35,
         "swarm": 0.5,
         "langchain_agent": 0.5,
+        "workflow": 0.5,
     }
 
     def __init__(self, config: Dict[str, Any], policy_config: Dict[str, Any] | None = None) -> None:
@@ -73,6 +74,7 @@ class RouterNode:
         scores["handoff"] = self._score_handoff(state, context)
         scores["swarm"] = self._score_swarm(last_message, context, latency_budget, cost_budget, elapsed_latency, spent_cost)
         scores["langchain_agent"] = self._score_langchain_agent(last_message, context, cost_budget, spent_cost)
+        scores["workflow"] = self._score_workflow(last_message, context)
 
         if self._should_use_hybrid(last_message, context, scores, disabled):
             scores["hybrid"] = 1.0
@@ -89,6 +91,8 @@ class RouterNode:
                 reason = f"score={score:.2f}"
                 if route == preferred:
                     reason = f"{reason};policy={policy_hint.get('name')}"
+                if route == "workflow":
+                    reason = "workflow_request"
                 return RouteDecision(route=route, reason=reason, scores=scores)
         return RouteDecision(route="rag", reason="default_fallback", scores=scores)
 
@@ -102,6 +106,8 @@ class RouterNode:
             score += 0.6
         if re.search(r"\bgraph\b|\brelationship\b|\bnetwork\b", message, re.IGNORECASE):
             score += 0.3
+        if re.search(r"\bgraph\b", message, re.IGNORECASE) and re.search(r"\brelationship\b", message, re.IGNORECASE):
+            score += 0.2
         if len(message.split()) > 40:
             score += 0.1
         if latency_budget and latency_budget < self.graph_latency_cutoff:
@@ -193,6 +199,19 @@ class RouterNode:
         if len(message.split()) > 60 and re.search(r"\b(compare|analyze|relationship)\b", message, re.IGNORECASE):
             return True
         return False
+
+    def _score_workflow(self, message: str, context: Dict[str, Any]) -> float:
+        score = 0.0
+        mode = context.get("mode")
+        if mode == "architect":
+            return 1.0
+        if context.get("workflow_intent"):
+            score += 0.6
+        if re.search(r"\b(feature request|workflow plan|tech lead)\b", message, re.IGNORECASE):
+            score += 0.4
+        if "architect" in str(context.get("persona", "")).lower():
+            score += 0.2
+        return min(score, 1.0)
 
 
 def _last_message(state: Dict[str, Any]) -> str:

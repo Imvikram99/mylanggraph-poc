@@ -1,0 +1,47 @@
+roles:
+  architect:
+    summary: >
+      Architects translate ambiguous feature requests into a grounded plan that
+      references LangGraph state, memory lifecycles, and workflow guardrails.
+    sections:
+      - title: Vision
+        template: >
+          Clarify how "{request}" helps the {persona} persona ship value while
+          staying aligned with docs/plan.md.
+      - title: System Surface
+        template: >
+          Identify LangGraph modules that must change (router thresholds,
+          workflow nodes, telemetry) so the {stack} stack can support "{request}".
+      - title: Guardrails
+        template: >
+          Call out dependencies on FeatureState schema, checkpointing, and
+          governance logging so reviewer + tech lead can reason about risk.
+    success_metric: >
+      Workflow runs emit router_reason=workflow and capture checkpoints for each
+      gate (architecture, review, tech lead).
+
+  reviewer:
+    checklist:
+      - Architecture covers the user vision and critical modules.
+      - Plan lists explicit guardrails + telemetry hooks.
+      - Acceptance test references demo/feature_request.yaml.
+    corrections:
+      guardrails: >
+        Document acceptance gates for docs/plan.md and data/metrics/io_audit.jsonl
+        before approving the plan.
+
+  tech_lead:
+    intro: >
+      Tech leads turn the approved architecture into executable milestones and
+      dependencies so swarm/coding loops stay scoped.
+    phases:
+      - name: Design Hardening
+        focus: Update docs/plan.md + diagrams for workflow entry points.
+      - name: Implementation
+        focus: Land workflow nodes, FeatureState schema, and skills packs.
+      - name: Validation
+        focus: Run demo/feature_request.yaml + telemetry checks.
+    dependencies:
+      - FeatureState schema propagated through graph_builder.
+      - configs/workflows.yaml tracked alongside graph configs.
+      - demo/feature_request.yaml wired into scripts/run_scenarios.py.

@@ -1,0 +1,17 @@
+prompt: >
+  Architect a new feature request workflow so we can route “I need this
+  feature” prompts through architect, reviewer, and tech lead gates.
+context:
+  persona: architect
+  mode: architect
+  stack: LangGraph POC
+  scenario_id: feature_request
+assertions:
+  - type: contains
+    value: "Phase 1"
+  - type: metadata
+    path: ["metadata", "router_reason"]
+    equals: workflow_request
+  - type: metadata
+    path: ["metadata", "code_review", "status"]
+    equals: approved

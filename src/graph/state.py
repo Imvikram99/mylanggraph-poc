@@ -27,6 +27,27 @@ class AgentState(TypedDict, total=False):
     telemetry: Dict[str, Any]
 
 
+class FeaturePlan(TypedDict, total=False):
+    """Structured plan data tracked through workflow phases."""
+
+    request: str
+    architecture: Dict[str, Any]
+    review: Dict[str, Any]
+    implementation: Dict[str, Any]
+    metadata: Dict[str, Any]
+    review_feedback: List[str]
+    phases: List[Dict[str, Any]]
+
+
+class FeatureState(AgentState, total=False):
+    """Extended LangGraph state that stores workflow metadata."""
+
+    plan: FeaturePlan
+    checkpoints: List[Dict[str, Any]]
+    attempt_counters: Dict[str, int]
+    workflow_phase: str
+
+
 @dataclass
 class RouteDecision:
     """Structured router output persisted to metadata."""

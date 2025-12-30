@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -32,7 +33,16 @@ def run(
     config_path = output_dir / "peft_config.json"
     with config_path.open("w", encoding="utf-8") as fout:
         json.dump(config, fout, indent=2)
-    console.log(f"[green]PEFT config written[/] {config_path}")
+    manifest = {
+        "adapter": str(config_path),
+        "base_model": base_model,
+        "dataset": str(dataset),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    manifest_path = output_dir / "adapter_manifest.json"
+    with manifest_path.open("w", encoding="utf-8") as fout:
+        json.dump(manifest, fout, indent=2)
+    console.log(f"[green]PEFT config written[/] {config_path} (manifest={manifest_path})")
 
 
 if __name__ == "__main__":

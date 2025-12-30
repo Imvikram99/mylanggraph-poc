@@ -57,6 +57,10 @@ async def run(request: RunRequest, tenant: Dict[str, Any] = Depends(tenant_depen
     payload["context"]["tenant_id"] = tenant["id"]
     if tenant.get("model_provider"):
         payload["context"].setdefault("model_provider", tenant["model_provider"])
+    if tenant.get("reward_model"):
+        payload["context"].setdefault("reward_model_path", tenant["reward_model"])
+    if tenant.get("peft_adapter"):
+        payload["context"].setdefault("peft_adapter", tenant["peft_adapter"])
     result = execute_scenario(
         payload,
         scenario_name=payload["context"].get("scenario_id", "http"),
@@ -91,6 +95,10 @@ async def ws_run(websocket: WebSocket):
             wrapper["context"]["tenant_id"] = tenant["id"]
             if tenant.get("model_provider"):
                 wrapper["context"].setdefault("model_provider", tenant["model_provider"])
+            if tenant.get("reward_model"):
+                wrapper["context"].setdefault("reward_model_path", tenant["reward_model"])
+            if tenant.get("peft_adapter"):
+                wrapper["context"].setdefault("peft_adapter", tenant["peft_adapter"])
             async for label, event in _stream(wrapper, scenario_id, payload.get("graph_config")):
                 await websocket.send_json({"label": label, "payload": event})
     except WebSocketDisconnect:

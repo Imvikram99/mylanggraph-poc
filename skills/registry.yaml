@@ -10,4 +10,12 @@ packs:
   ops_pack:
     description: "Operational automation (planned)"
     module: "skills.ops_pack.tools"
-    tools: ["file_ticket"]
+    tools: ["file_ticket", "run_sandboxed"]
+  lead_pack:
+    description: "Architecture + stack decision helpers"
+    module: "skills.lead_pack.tools"
+    tools: ["choose_stack", "risk_matrix"]
+  implementation_pack:
+    description: "Implementation planning utilities"
+    module: "skills.implementation_pack.tools"
+    tools: ["phase_breakdown", "dependency_matrix"]

@@ -25,6 +25,7 @@ def run(
     output: Path = typer.Option(Path("data/metrics/prompt_search.jsonl"), "--output"),
 ):
     output.parent.mkdir(parents=True, exist_ok=True)
+    best = None
     with output.open("w", encoding="utf-8") as fout:
         for topic, style in product(topics, styles):
             candidate = f"[{style.upper()}] " + prompt.format(topic=topic)
@@ -32,6 +33,13 @@ def run(
             record = {"topic": topic, "style": style, "prompt": candidate, "score": score}
             fout.write(json.dumps(record) + "\n")
             console.log(f"[green]candidate[/] {topic}/{style} score={score}")
+            if best is None or score > best["score"]:
+                best = record
+    if best:
+        summary_path = Path("data/metrics/prompt_tuning.json")
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(json.dumps(best, indent=2), encoding="utf-8")
+        console.log(f"[cyan]Best prompt[/] {best['style']} topic={best['topic']} score={best['score']}")
 
 
 if __name__ == "__main__":

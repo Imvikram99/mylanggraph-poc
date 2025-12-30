@@ -77,6 +77,12 @@ We’ll evolve the POC in clear phases so a single engineer (or Codex automation
   - ✅ Workflow nodes wrapped by `CostLatencyTracker`.
   - ✅ Plan reviewer can send corrections (use `RetryNode` contract).
 
+**Implementation notes**
+- `configs/workflows.yaml` holds the architect/reviewer/tech-lead prompt templates.
+- `FeatureState` extends the base agent state with `plan`, `checkpoints`, and `workflow_phase` metadata that flow through `graph_builder`.
+- New workflow nodes live in `src/graph/nodes/workflow.py`, and the scenario `demo/feature_request.yaml` asserts `router_reason=workflow_request`.
+- Set `WORKFLOW_REQUIRE_APPROVALS=true` in `.env` to pause before `plan_reviewer`/`tech_lead` for HITL approvals.
+
 ## Phase 3 – Implementation Planner & Phase Gates
 - **Goals**: Turn reviewer-approved plans into phase-wise execution steps and align with swarm/coding loops.
 - **Tasks**:
@@ -90,6 +96,11 @@ We’ll evolve the POC in clear phases so a single engineer (or Codex automation
 - **Exit checks**:
   - ✅ When Implementation planner fails validation, reviewer feedback loops until corrected.
   - ✅ Swarm outputs cite phase titles in `state["output"]`.
+
+**Implementation notes**
+- `docs/implementation.md` + `data/knowledge_base/workflows/implementation_playbook.md` define the templates consumed by `ImplementationPlannerNode`.
+- `FeatureState.plan.phases` holds the phase slices, and `SwarmNode` now emits summaries referencing `Phase 1`, `Phase 2`, etc.
+- `scripts/workflow/new_feature.py` scaffolds feature-request scenarios with the correct workflow context and assertions.
 
 ## Phase 4 – Coding, Review, and Automation
 - **Goals**: Drive real edits and reviews based on the phase plan, enabling Codex/agents to implement features end-to-end.
@@ -106,6 +117,25 @@ We’ll evolve the POC in clear phases so a single engineer (or Codex automation
   - ✅ CodeReviewNode emits actionable feedback when acceptance tests missing.
   - ✅ IO audit shows new route + metadata (`workflow_phase`).
 
+**Implementation plan**
+- **PlanSummaryNode**:
+  - Create `PlanSummaryNode` (e.g., `src/graph/nodes/summary.py` extension) that ingests `FeatureState.plan` + recent conversation and outputs a concise system brief stored in `state["messages"]` and `state["plan"]["summary"]`.
+  - Hook the node between `implementation_planner` and the execution branch so downstream coding agents operate on the summary, and ensure old brainstorm messages are trimmed.
+- **Phase-aware execution**:
+  - Extend `LangChainAgentNode` to iterate through `plan["phases"]`, setting context (owner, deliverables, acceptance tests) before executing each subtask.
+  - Allow phases to select skill packs dynamically (`context.skill_pack`, `skill_args`) so the agent can call `report_pack`, `lead_pack`, etc.
+  - Persist per-phase outputs into `FeatureState["checkpoints"]` and attach them to `artifacts`.
+- **Secure code execution**:
+  - Integrate a sandbox tool (Docker/E2B wrapper) exposed via `skills/ops_pack`, ensuring file writes/tests run in isolation.
+  - Provide configuration in `.env`/`configs/graph_config.*` for sandbox toggles (local vs. remote).
+- **CodeReviewNode**:
+  - Implement `CodeReviewNode` that reads `docs/playbooks/product_alignment.md` and `docs/playbooks/data_engineering.md`, validates phase outputs against guardrails, and emits actionable feedback if acceptance tests are missing.
+  - Wire the reviewer after phase execution, with retries if critical findings exist, and log results to `data/metrics/io_audit.jsonl`.
+- **Telemetry + CLI**:
+  - Augment `data/trajectories/run_*.json` with a per-phase checklist artifact (plan summary → implementation outputs → review verdicts).
+  - Update `scripts/workflow/new_feature.py` (or add a companion command) to set `context.recursion_limit`, sandbox preferences, and desired reviewers for coding phases.
+  - Document how to run `python -m src.runner --scenario demo/feature_request.yaml --stream` to observe the full coding loop.
+
 ## Phase 5 – Observability & Governance Expansion
 - **Goals**: Ensure every feature run captures budget, evaluation, and governance posture.
 - **Tasks**:
@@ -118,6 +148,23 @@ We’ll evolve the POC in clear phases so a single engineer (or Codex automation
 - **Exit checks**:
   - ✅ Regression tests fail if workflow path skips evaluator or audit logging.
 
+**Implementation plan**
+- **Tracker enhancements**:
+  - Update `CostLatencyTracker` to capture `state["workflow_phase"]` for each node invocation, persisting `"workflow_phase"` into `data/metrics/cost_latency.jsonl`.
+  - Expose tracker summaries (cost, latency, phase coverage) via a helper API so CLI runners can print aggregates.
+- **Evaluator upgrades**:
+  - Expand `EvaluatorNode` prompt logic to reference `plan["phases"]`, verifying coverage/risks per phase.
+  - Log evaluator verdicts (coverage %, risk notes) into metadata and emit them to the new governance log.
+- **Governance logging**:
+  - Introduce `data/metrics/governance.jsonl` storing `{scenario_id, phase, route, review_status, cost_usd, latency_s}` for every run.
+  - Provide a CLI command (e.g., `python scripts/eval/adversarial_scan.py ...`) that reads the log, checks for missing phases, and raises on gaps.
+- **IO audit guardrails**:
+  - Enhance `IOAuditLogger` to fail when workflow runs skip evaluator/code review entries, wiring this check into pytest/regression tests.
+  - Add unit tests ensuring skipped evaluator paths raise exceptions.
+- **Docs & verification**:
+  - Document the observability steps in `docs/plan.md` and `README.md` (validation commands, governance log schema).
+  - Update `scripts/workflow/new_feature.py` or a companion script to note where governance artifacts are stored so operators can retrieve them quickly.
+
 ## Phase 6 – Stretch: RLHF, Prompt/PEFT, Deployment
 - **Goals**: Turn the workflow into a showcase of advanced capabilities.
 - **Tasks**:
@@ -127,6 +174,20 @@ We’ll evolve the POC in clear phases so a single engineer (or Codex automation
 - **Deliverables**:
   - Benchmarks comparing pre/post tuning.
   - CI entry ensuring workflow scenario runs nightly.
+
+**Implementation plan**
+- **RLHF integration**:
+  - Connect `scripts/rlhf/train_reward.py` outputs to the evaluator/code-review loop, feeding reward scores into `EvaluatorNode` metadata and adjusting router weights.
+  - Automate reward-model training from trajectory archives, storing checkpoints under `data/rlhf/`.
+- **Prompt/PEFT tuning**:
+  - Use `docs/prompt_tuning.md` as the template for Architect/Tech Lead prompts; add a tuning command that sweeps key variables and writes results to `data/metrics/prompt_tuning.json`.
+  - Scaffold PEFT adapters for the preferred LLM (LoRA or QLoRA), hooking them into `configs/models.yaml` with toggles for sandbox/deployment.
+- **Deployment hardening**:
+  - Flesh out `configs/tenants.yaml` + FastAPI server settings so the workflow can run multi-tenant; add guardrails for tenant-specific secrets and logging.
+  - Create CI checks that run `demo/feature_request.yaml` nightly, capture reward-model deltas, and fail on regressions.
+- **Benchmarking/documentation**:
+  - Define before/after metrics for RLHF + prompt tuning (accuracy, cost, latency) and publish them in `docs/benchmarks.md`.
+  - Document deployment steps (FastAPI service, tenant config, PEFT adapter usage) so ops can promote the workflow to staging/prod.
 
 ---
 

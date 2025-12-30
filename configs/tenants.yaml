@@ -2,12 +2,16 @@ tenants:
   default:
     rate_limit_rpm: 60
     model_provider: openrouter
+    reward_model: data/rlhf/reward_model.json
+    peft_adapter: data/peft/peft_config.json
     feature_flags:
       agent_run: true
       streaming: true
   enterprise:
     rate_limit_rpm: 20
     model_provider: azure
+    reward_model: data/rlhf/reward_model.json
+    peft_adapter: data/peft/enterprise_peft.json
     feature_flags:
       agent_run: true
       streaming: false

@@ -36,12 +36,14 @@ class CostLatencyTracker:
             self.total_duration += duration
             self.total_tokens += delta_tokens
             self.cost_usd += cost
+            workflow_phase = target.get("workflow_phase") or state.get("workflow_phase") if isinstance(state, dict) else None
             self.records.append(
                 {
                     "node": node_name,
                     "duration_s": round(duration, 4),
                     "token_delta": delta_tokens,
                     "cost_usd": round(cost, 6),
+                    "workflow_phase": workflow_phase,
                 }
             )
             self._update_state_metrics(target, node_name)

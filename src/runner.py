@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from pydantic import ValidationError
 from rich.console import Console
 
+from .eval import GovernanceLogger
 from .graph import build_agent_graph
 from .memory import build_checkpointer
 from .observability import TelemetryLogger
@@ -25,6 +26,7 @@ from .schemas.scenario import IOAuditRecord
 app = typer.Typer(help="Run LangGraph POC scenarios.")
 console = Console()
 audit_logger = IOAuditLogger()
+governance_logger = GovernanceLogger()
 
 
 @app.command()
@@ -229,6 +231,8 @@ def _finalize_monitor(
     if isinstance(final_state, dict):
         route = final_state.get("route")
     tracker.flush(scenario_id, route)
+    if isinstance(final_state, dict):
+        governance_logger.log(final_state)
 
 
 def _validate_input(payload: Dict[str, Any], scenario_name: str) -> ScenarioInput:
@@ -267,6 +271,11 @@ def _audit_run(scenario_input: ScenarioInput, final_state: Dict[str, Any] | None
             route = scenario_output.route
         except ValidationError as exc:
             error_list.append(str(exc))
+        metadata = final_state.get("metadata") or {}
+        evaluations = metadata.get("evaluations")
+        if not evaluations:
+            valid_output = False
+            error_list.append("missing_evaluations")
     record = IOAuditRecord(
         scenario_id=scenario_input.context.get("scenario_id") or scenario_input.id or "unknown",
         valid_input=True,
