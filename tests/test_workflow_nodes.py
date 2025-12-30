@@ -1,3 +1,4 @@
+import src.graph.nodes.workflow as workflow_mod
 from src.graph.nodes.code_review import CodeReviewNode
 from src.graph.nodes.langchain_agent import LangChainAgentNode
 from src.graph.nodes.retry import RetryNode
@@ -19,7 +20,8 @@ def base_state():
     }
 
 
-def test_workflow_nodes_generate_plan_end_to_end():
+def test_workflow_nodes_generate_plan_end_to_end(monkeypatch):
+    monkeypatch.setattr(workflow_mod, "request_codex", lambda *_, **__: "codex_ok")
     config = load_workflow_config("configs/workflows.yaml")
     selector = WorkflowSelectorNode(config)
     architect = ArchitecturePlannerNode(config)

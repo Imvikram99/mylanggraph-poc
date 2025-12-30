@@ -125,6 +125,10 @@ We’ll evolve the POC in clear phases so a single engineer (or Codex automation
   - Extend `LangChainAgentNode` to iterate through `plan["phases"]`, setting context (owner, deliverables, acceptance tests) before executing each subtask.
   - Allow phases to select skill packs dynamically (`context.skill_pack`, `skill_args`) so the agent can call `report_pack`, `lead_pack`, etc.
   - Persist per-phase outputs into `FeatureState["checkpoints"]` and attach them to `artifacts`.
+- **Repo automation entrypoint**:
+  - Provide a CLI (`python scripts/workflow/new_feature.py run --repo <path>|--repo-url <url> --branch feature/test --prompt "Implement X"`) to capture feature requests, repository locations, and target branches in a single step.
+  - Flow repo metadata through `FeatureState.plan.metadata` and execution nodes so the coding phase can automatically call `ops_pack.prepare_repo` / `ops_pack.run_repo_command` to clone/check out branches inside `WORKFLOW_REPO_ROOT` and run git status/tests in a sandbox.
+  - Add a Codex bridge skill (`codex_pack.request_codex`) that wraps `scripts/ops/codex_proxy.py`, forwarding coding tasks to the Codex CLI so all code generation remains in the approved environment. Configure `CODEX_CLI_COMMAND` and optionally `WORKFLOW_REPO_ROOT`/`CODEX_TARGET_REPO` to point at the desired workspace.
 - **Secure code execution**:
   - Integrate a sandbox tool (Docker/E2B wrapper) exposed via `skills/ops_pack`, ensuring file writes/tests run in isolation.
   - Provide configuration in `.env`/`configs/graph_config.*` for sandbox toggles (local vs. remote).

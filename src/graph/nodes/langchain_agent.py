@@ -6,7 +6,15 @@ from typing import Any, Dict, List
 
 from rich.console import Console
 
-from skills.ops_pack.tools import run_sandboxed
+from pathlib import Path
+
+from skills.codex_pack.tools import request_codex
+from skills.ops_pack.tools import (
+    prepare_repo,
+    resolve_repo_workspace,
+    run_repo_command,
+    run_sandboxed,
+)
 
 try:  # pragma: no cover - optional dependency components
     from langchain.agents import AgentType, Tool, initialize_agent
@@ -63,12 +71,31 @@ class LangChainAgentNode:
         metadata = state.setdefault("metadata", {})
         phase_outputs = []
         checkpoints = state.setdefault("checkpoints", [])
+        repo_workspace, prep_log = self._prepare_repo_workspace(state)
+        phase_exec = metadata.setdefault("phase_execution", {})
+        if prep_log:
+            phase_exec["repo_prep"] = prep_log
+        if repo_workspace:
+            phase_exec["repo_path"] = str(repo_workspace)
+        repo_branch = state.get("context", {}).get("target_branch")
+        repo_ref = str(repo_workspace) if repo_workspace else None
+        plan_request = (state.get("plan") or {}).get("request", "")
         for idx, phase in enumerate(phases, start=1):
             owner = phase.get("owner", "architect")
             deliverables = phase.get("deliverables") or []
             acceptance = phase.get("acceptance") or []
             sandbox_cmd = f"phase_{idx}_{phase.get('name', 'unknown').replace(' ', '_').lower()}"
-            sandbox_result = run_sandboxed(f"echo Executing {sandbox_cmd}")
+            if repo_workspace:
+                repo_cmd = run_repo_command(repo_workspace, f"git status -sb || echo '{sandbox_cmd}'")
+            else:
+                repo_cmd = run_sandboxed(f"echo Executing {sandbox_cmd}")
+            codex_result = self._invoke_codex(
+                phase_idx=idx,
+                phase=phase,
+                feature_request=plan_request,
+                repo_path=repo_ref,
+                branch=repo_branch,
+            )
             summary_lines = [
                 f"Phase {idx} – {phase.get('name', f'Phase {idx}')}",
                 f"Owner: {owner}",
@@ -77,12 +104,18 @@ class LangChainAgentNode:
             summary_lines.extend(f"  - {item}" for item in deliverables)
             summary_lines.append("Acceptance:")
             summary_lines.extend(f"  - {item}" for item in acceptance)
-            summary_lines.append(f"Sandbox: {sandbox_result}")
+            if repo_ref:
+                summary_lines.append(f"Repo: {repo_ref}{f' (branch {repo_branch})' if repo_branch else ''}")
+                summary_lines.append(f"Repo command: {repo_cmd}")
+            else:
+                summary_lines.append(f"Sandbox: {repo_cmd}")
+            summary_lines.append(f"Codex CLI: {codex_result}")
             phase_output = "\n".join(summary_lines)
             phase_outputs.append(phase_output)
             checkpoints.append({"phase": phase.get("name", f"Phase {idx}"), "owner": owner, "status": "executed"})
+            phase_exec.setdefault("codex_calls", []).append({"phase": phase.get("name"), "result": codex_result})
         output = "\n\n".join(phase_outputs)
-        metadata["phase_execution"] = {"count": len(phases)}
+        phase_exec["count"] = len(phases)
         state["workflow_phase"] = "execution"
         state["output"] = output
         state.setdefault("messages", []).append({"role": "assistant", "content": output})
@@ -117,6 +150,64 @@ class LangChainAgentNode:
             "4. Produce final brief for stakeholders.",
         ]
         return "\n".join(steps)
+
+    def _prepare_repo_workspace(self, state: Dict[str, Any]) -> tuple[Path | None, str | None]:
+        context = state.get("context", {}) or {}
+        repo_path = context.get("repo_path")
+        repo_url = context.get("repo_url")
+        branch = context.get("target_branch")
+        feature = context.get("feature_request") or (state.get("plan") or {}).get("request")
+        if not repo_path and not repo_url:
+            return None, None
+        prep_log = prepare_repo(repo_path=repo_path, repo_url=repo_url, branch=branch, feature=feature)
+        workspace = resolve_repo_workspace(repo_path=repo_path, repo_url=repo_url)
+        return workspace, prep_log
+
+    def _invoke_codex(
+        self,
+        *,
+        phase_idx: int,
+        phase: Dict[str, Any],
+        feature_request: str,
+        repo_path: str | None,
+        branch: str | None,
+    ) -> str:
+        instruction = self._format_phase_instruction(phase_idx, phase, feature_request, repo_path, branch)
+        try:
+            return request_codex(instruction, repo_path=repo_path, branch=branch)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            console.log(f"[red]Codex bridge error[/] {exc}")
+            return f"[codex] error: {exc}"
+
+    def _format_phase_instruction(
+        self,
+        idx: int,
+        phase: Dict[str, Any],
+        feature_request: str,
+        repo_path: str | None,
+        branch: str | None,
+    ) -> str:
+        name = phase.get("name") or f"Phase {idx}"
+        deliverables = phase.get("deliverables") or []
+        acceptance = phase.get("acceptance") or []
+        lines = [
+            f"Feature request: {feature_request or 'unspecified'}",
+            f"Phase: {name}",
+            f"Repo: {repo_path or 'unspecified'}",
+            f"Branch: {branch or 'current'}",
+            "Deliverables:",
+        ]
+        if deliverables:
+            lines.extend(f"- {item}" for item in deliverables)
+        else:
+            lines.append("- (not specified)")
+        lines.append("Acceptance criteria:")
+        if acceptance:
+            lines.extend(f"- {item}" for item in acceptance)
+        else:
+            lines.append("- (not specified)")
+        lines.append("Please implement this phase, run relevant tests, and ensure outputs align with guardrails.")
+        return "\n".join(lines)
 
 
 def _last_user_content(messages: List[Dict[str, Any]]) -> str:

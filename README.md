@@ -120,6 +120,8 @@ Stop with `docker stop qdrant` when done.
 - `VECTOR_DB_PATH=./data/memory/vectorstore` (fallback) and `QDRANT_COLLECTION=langgraph_memories`
 - `MCP_SERVER_REGISTRY=./configs/mcp_tools.yaml`
 - `QDRANT_URL=http://localhost:6333` and `QDRANT_API_KEY=` (blank for local)
+- `WORKFLOW_REPO_ROOT=./data/workspaces` (where automated workflow clones/checkouts live)
+- `CODEX_CLI_COMMAND="codex-cli run"` (or full path) so `codex_pack.request_codex` can forward tasks
 - `MEMORY_TIME_WINDOW_DAYS=30`, `MEMORY_DECAY_HALF_LIFE_HOURS=72`
 - `MEMORY_TOP_K=8`, `MEMORY_TTL_TASK_DAYS=7`
 
@@ -140,6 +142,18 @@ This consumes `StateGraph.stream` events, prints them live, and appends structur
 python -m src.runner --scenario demo/autonomous_analyst.yaml
 ```
 Routes through the LangChain-powered agent node to demonstrate cyclic planning/execution loops.
+
+**Feature workflow CLI**
+```bash
+python scripts/workflow/new_feature.py run \
+  --prompt "Ship the test endpoint in horilla/backend" \
+  --repo /Users/apple/Documents/vikram_workspace/spring-boot/brbhr/horilla/backend \
+  --branch feature/test \
+  --feature "API smoke test" \
+  --graph-config configs/graph_config.dev.yaml \
+  --stream
+```
+Generates a scenario with repo metadata and immediately runs the Architect → Reviewer → Tech Lead → Coding workflow. Repositories are prepared under `WORKFLOW_REPO_ROOT` (defaults to `data/workspaces`) so the LangChain agent can safely call `ops_pack.prepare_repo` / `ops_pack.run_repo_command` to manage branches and run git status/tests in a sandbox, while coding tasks are forwarded to the Codex CLI through the `codex_pack.request_codex` skill (`scripts/ops/codex_proxy.py`); set `CODEX_CLI_COMMAND` to point at your Codex CLI binary.
 
 **Scenario smoke tests**
 ```bash

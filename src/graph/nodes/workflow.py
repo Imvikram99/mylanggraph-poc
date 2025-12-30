@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from rich.console import Console
 
 from ..messages import append_message
+from skills.codex_pack.tools import request_codex
 from skills.implementation_pack.tools import dependency_matrix, phase_breakdown
 from skills.lead_pack.tools import choose_stack, risk_matrix
 
@@ -20,6 +21,24 @@ def _last_user_message(state: Dict[str, Any]) -> str:
         if message.get("role") == "user":
             return str(message.get("content", "")).strip()
     return ""
+
+
+def _dispatch_codex(plan: Dict[str, Any], phase: str, instructions: str) -> str:
+    metadata = plan.setdefault("metadata", {})
+    repo_path = metadata.get("repo_path")
+    branch = metadata.get("target_branch")
+    request_name = plan.get("request") or metadata.get("feature_request") or "feature"
+    payload = "\n".join(
+        [
+            f"Feature request: {request_name}",
+            f"Workflow phase: {phase}",
+            instructions.strip(),
+            "Update referenced files and return a short status summary.",
+        ]
+    )
+    result = request_codex(payload, repo_path=repo_path, branch=branch)
+    metadata.setdefault("codex_logs", {})[phase] = result
+    return result
 
 
 class WorkflowSelectorNode:
@@ -39,12 +58,24 @@ class WorkflowSelectorNode:
                 "persona": context.get("persona", "architect"),
                 "stack": context.get("stack", context.get("platform", "LangGraph POC")),
                 "priority": context.get("priority", "standard"),
+                "repo_path": context.get("repo_path") or context.get("repo"),
+                "repo_url": context.get("repo_url"),
+                "target_branch": context.get("target_branch") or context.get("branch"),
+                "feature_request": context.get("feature_request") or request,
             }
         )
         state.setdefault("checkpoints", [])
         state.setdefault("attempt_counters", {})
         state["workflow_phase"] = "intake"
-        append_message(state, "system", f"Workflow intake captured feature request: {request}")
+        repo_meta = plan["metadata"]
+        repo_note = ""
+        repo_ref = repo_meta.get("repo_path") or repo_meta.get("repo_url")
+        if repo_ref:
+            branch = repo_meta.get("target_branch")
+            repo_note = f" Repo: {repo_ref}"
+            if branch:
+                repo_note += f" (branch {branch})"
+        append_message(state, "system", f"Workflow intake captured feature request: {request}.{repo_note}")
         console.log(f"[magenta]WorkflowSelector[/] request='{request}' stack={plan['metadata']['stack']}")
         return state
 
@@ -64,6 +95,13 @@ class ArchitecturePlannerNode:
         metadata = plan.setdefault("metadata", {})
         persona = metadata.get("persona") or state.get("context", {}).get("persona", "architect")
         stack = metadata.get("stack") or state.get("context", {}).get("stack", "LangGraph POC")
+        _dispatch_codex(
+            plan,
+            "architecture_planning",
+            f"Create or update docs/plan.md with the architecture vision, system changes, guardrails, "
+            f"success metrics, and key risks for '{request}'. Reference persona '{persona}' and stack '{stack}'. "
+            "Include links to relevant knowledge-base files and ensure the document is well structured.",
+        )
         summary_sections: List[Dict[str, str]] = []
         for section in self.sections:
             text = section.get("template", "").format(request=request, persona=persona, stack=stack)
@@ -135,6 +173,12 @@ class PlanReviewerNode:
         state["workflow_phase"] = "review"
         attempt_counters["plan_review"] = attempt_counters.get("plan_review", 0) + 1
         if missing and attempt_counters["plan_review"] == 1:
+            _dispatch_codex(
+                plan,
+                "architecture_review",
+                "Review docs/plan.md for the feature, address the following gaps: "
+                f"{', '.join(missing)}. Update the document with reviewer notes and request any fixes.",
+            )
             feedback = f"Reviewer requested updates for: {', '.join(missing)}."
             plan.setdefault("review_feedback", []).append(feedback)
             append_message(state, "assistant", feedback, name="plan_reviewer")
@@ -148,6 +192,12 @@ class PlanReviewerNode:
         }
         state["workflow_phase"] = "review_approved"
         state["checkpoints"].append({"phase": "review", "status": "approved"})
+        _dispatch_codex(
+            plan,
+            "architecture_review",
+            "Confirm reviewer approval in docs/plan.md by adding a 'Reviewer Sign-off' section summarizing "
+            "acceptance tests and guardrails for this feature.",
+        )
         append_message(state, "assistant", "Plan reviewer approved the architecture.", name="plan_reviewer")
         console.log("[green]PlanReviewer[/] approved plan")
         return state
@@ -168,6 +218,13 @@ class TechLeadNode:
         request = plan.get("request") or _last_user_message(state)
         metadata = plan.setdefault("metadata", {})
         stack = metadata.get("stack", state.get("context", {}).get("stack", "LangGraph POC"))
+        _dispatch_codex(
+            plan,
+            "tech_lead_planning",
+            "Produce the Tech Lead plan for this feature in docs/plan.md (or docs/feature.md) including "
+            "stack recommendations, dependencies, guardrails, and a numbered list of phases with focus areas. "
+            "Ensure the document references the reviewer-approved guardrails.",
+        )
 
         phase_entries = [
             {"name": cfg.get("name", f"Phase {idx+1}"), "focus": cfg.get("focus", "")}
@@ -239,6 +296,13 @@ class ImplementationPlannerNode:
         review_status = (plan.get("review") or {}).get("status")
         if review_status != "approved":
             raise ValueError("Implementation planner requires an approved review state.")
+        _dispatch_codex(
+            plan,
+            "implementation_planning",
+            "Break the implementation into phases (Design Hardening, Implementation, Validation) inside "
+            "docs/implementation.md or docs/plan.md. For each phase list owner, deliverables, and acceptance "
+            "criteria, and capture a machine-readable summary if possible.",
+        )
         template_sections = self._load_template_sections()
         request = plan.get("request") or _last_user_message(state)
         context = state.get("context", {})

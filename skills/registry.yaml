@@ -8,9 +8,13 @@ packs:
     module: "skills.report_pack.tools"
     tools: ["draft_outline", "format_report"]
   ops_pack:
-    description: "Operational automation (planned)"
+    description: "Operational automation + repo helpers"
     module: "skills.ops_pack.tools"
-    tools: ["file_ticket", "run_sandboxed"]
+    tools: ["file_ticket", "run_sandboxed", "prepare_repo", "run_repo_command"]
+  codex_pack:
+    description: "Bridge to Codex CLI for code generation"
+    module: "skills.codex_pack.tools"
+    tools: ["request_codex"]
   lead_pack:
     description: "Architecture + stack decision helpers"
     module: "skills.lead_pack.tools"
