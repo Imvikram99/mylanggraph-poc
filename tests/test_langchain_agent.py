@@ -55,3 +55,30 @@ def test_langchain_agent_with_repo_context(monkeypatch):
     assert result["metadata"]["phase_execution"]["repo_path"] == "/tmp/workspace"
     codex_calls = result["metadata"]["phase_execution"]["codex_calls"]
     assert codex_calls and codex_calls[0]["result"] == "codex_ok_repo"
+
+
+def test_langchain_agent_plan_only_skips_execution(monkeypatch):
+    called = {"count": 0}
+
+    def _raise_if_called(*_, **__):
+        called["count"] += 1
+        return "should_not_run"
+
+    monkeypatch.setattr(agent_mod, "request_codex", _raise_if_called)
+    node = agent_mod.LangChainAgentNode()
+    state = {
+        "plan": {
+            "phases": [
+                {"name": "Phase Alpha", "deliverables": ["Do X"], "acceptance": ["Test Y"]},
+            ],
+            "summary": "Planning complete",
+        },
+        "context": {"plan_only": True},
+        "metadata": {},
+    }
+    result = node.run(state)
+    assert called["count"] == 0
+    assert result["workflow_phase"] == "plan_only"
+    assert "Planning complete" in result["output"]
+    phase_exec = result["metadata"]["phase_execution"]
+    assert phase_exec["skipped"] == "plan_only"

@@ -1,218 +1,81 @@
-# LangGraph Agentic Roadmap
+# Implement `<feature summary>` — Architecture Plan
 
-We’ll evolve the POC in clear phases so a single engineer (or Codex automation) can pick up work, know the exit criteria, and keep telemetry/governance intact. Each phase lists goals, deliverables, exit tests, and upstream dependencies.
+> Persona: **architect**  
+> Target stack: **LangGraph POC**
 
----
+## Knowledge Base References
+- [MCP_SERVER_ARCHITECTURE.md](../MCP_SERVER_ARCHITECTURE.md) — reuse the documented MCP gateway, RBAC enforcement, and provider-abstraction layers when defining the new LangGraph entry points and security flows.
+- [CONVERSATIONAL_AI_ARCHITECTURE.md](../CONVERSATIONAL_AI_ARCHITECTURE.md) — align conversational safety, language-aware prompting, and circuit-breaker guidance with LangGraph nodes so the new feature inherits proven resiliency.
 
-## Expert Review & Guardrails
-- **Verdict**: The Architect → Reviewer → Lead design leans into LangGraph’s strengths (stateful cycles + HITL). Keep separation between planning and evaluation so no node grades its own work.
-- **State schema first**: Introduce a `FeatureState` `TypedDict` now with `messages`, `plan` (structured dict), `checkpoints`, and counters (e.g., `review_attempts`). This avoids string-diff churn when Reviewer edits individual plan sections.
-- **Approval pauses**: Use LangGraph `interrupt_before`/`interrupt_after` hooks so Architect/Tech Lead outputs can pause for human approval (or CLI confirmation) before proceeding.
-- **Router-worker vs. swarm**: Treat Swarm execution as an orchestrated map stage—emit a task list, then dispatch specialized workers rather than free-form agent chatter to prevent runaway costs.
-- **State summarization**: Before coding begins, summarize the approved plan into a fresh system message and truncate brainstorming context so coding agents operate with a concise brief.
-- **Circuit breaker**: Track attempt counts per loop and fail fast (surface a `needs_human` error) after N retries to avoid infinite Architect↔Reviewer cycles.
+## Architecture Vision
+1. **Graph-native orchestration:** Use LangGraph POC as the control plane that sequences MCP services, Spring Boot endpoints, and AI providers while preserving deterministic state transitions and auditability.
+2. **Persona-aligned UX:** Provide the architect persona with composable blueprints (graph nodes, MCP services, and React widgets) that can be mixed to deliver `<feature summary>` faster without duplicating orchestration logic.
+3. **MCP-aware adapters:** Treat LangGraph edges as intents routed through the RBAC-aware MCP gateway so that educator, student, and admin capabilities remain bounded as outlined in `MCP_SERVER_ARCHITECTURE.md`.
+4. **Observability-first:** Every LangGraph step emits structured events (graph node, MCP service, provider metadata) enabling correlation with the circuit-breaker and language instrumentation patterns from `CONVERSATIONAL_AI_ARCHITECTURE.md`.
 
-## Phase 0 – Baseline Readiness
-- **Goals**: Run the repo locally, load env vars, ingest minimum docs. Capture current behavior as a control trajectory.
-- **Deliverables**:
-  - `.env` populated with routing + provider keys.
-  - `python scripts/ingest.py --docs data/knowledge_base` refreshed embeddings.
-  - `python -m src.runner --scenario demo/rag_qa.yaml --stream` logs saved to `data/trajectories/`.
-- **Exit checks**:
-  - ✅ `data/memory/vectorstore/` contains fresh files.
-  - ✅ `data/metrics/io_audit.jsonl` confirms valid input/output for the smoke scenario.
+## System Changes
+### 1. LangGraph Control Layer
+- Define a `feature_summary_graph.yaml` that maps user triggers → intent classifier → MCP action nodes → validation / enrichment nodes.
+- Embed guard nodes for provider selection and fallback, mirroring the circuit breaker table from `CONVERSATIONAL_AI_ARCHITECTURE.md`.
+- Persist graph execution traces (inputs, outputs, chosen provider) so MCP audit trails stay intact.
 
-### Phase 0 Implementation Plan
-| Step | Owner | Actions | Success Criteria |
-| --- | --- | --- | --- |
-| 0.1 Environment bootstrap | Ops | Create/activate `.venv`, install deps via `pip install -r requirements.txt`, copy `.env.example` to `.env` | `which python` points to local venv; `.env` populated with required keys |
-| 0.2 Provider + telemetry wiring | Ops | Fill `.env` with `OPENROUTER_API_KEY`, `MODEL_PROVIDER`, `QDRANT_URL`; run `python -m src.runner --help` to confirm config loads; ensure `LANGCHAIN_TRACING_V2` disabled unless LangSmith configured | CLI starts without missing env errors |
-| 0.3 Vector store ingestion | Researcher | Run `python scripts/ingest.py --docs data/knowledge_base`; verify logs mention document count; snapshot `${VECTOR_DB_PATH}` timestamp | `ls -lh data/memory/vectorstore` shows updated files (+ telemetry in console) |
-| 0.4 Baseline run | Researcher | Execute `python -m src.runner --scenario demo/rag_qa.yaml --stream --graph-config configs/graph_config.dev.yaml`; capture console output + `data/trajectories/run_*.json` | Trajectory + IO audit written; router route recorded |
-| 0.5 Verification + checklist | Ops | Confirm `data/metrics/io_audit.jsonl` contains latest scenario_id with `valid_input=true`, `valid_output=true`; document run metadata in this file (phase checklist) | Exit criteria satisfied; share run hash in stand-up |
+### 2. MCP Gateway Extensions
+- Add a `GRAPH_AGENT` service type that authorizes LangGraph-originated requests using the same JWT/RBAC middleware described in `MCP_SERVER_ARCHITECTURE.md`.
+- Introduce minimal DTOs so LangGraph nodes can invoke `RoleBasedServiceRouter` safely (e.g., `GraphIntentRequest` → `McpServiceType`).
+- Update audit logging to capture both graph step ID and MCP service name.
 
-**Notes**
-- If ingestion fails due to Qdrant connectivity, temporarily set `VECTOR_DB_IMPL=chroma` in `.env` to unblock Phase 0 while infrastructure is provisioned.
-- Capture screenshots or logs for each step; they become evidence for Phase 1 onboarding.
+### 3. Backend Service Enhancements
+- Surface Spring Boot endpoints (under `/api/graph/feature-summary/*`) that encapsulate any data fetches LangGraph needs, ensuring caching + pagination mirror existing admin/teacher flows.
+- Extend AI provider configuration with LangGraph-specific policies (max tokens, timeout, preferred provider order).
+- Add async workers that can be called from LangGraph when long-running MCP services are triggered; return job handles to keep the graph non-blocking.
 
-## Phase 1 – Repository & Knowledge Discovery
-- **Goals**: Teach the system about existing capabilities so future prompts stay grounded.
-- **Tasks**:
-  1. Expand `data/knowledge_base/` with architecture docs, run `scripts/ingest.py`.
-  2. Use `SkillHubNode` + MCP filesystem tool to ensure all key docs (README, configs, docs/strategies.md) are retrievable.
-  3. Tag memories using `TemporalMemoryStore` categories (`architecture`, `workflow`, `evaluation`).
-- **Deliverables**:
-  - Curated Markdown notes linking each module to responsibilities.
-  - Memory search smoke tests (`python scripts/run_scenarios.py --scenarios demo`) verifying hits for “architecture”, “swarm”, etc.
+### 4. Frontend/Experience Layer
+- Deliver a thin React orchestrator widget that lets admins preview each LangGraph path, reusing prompt-building UX patterns from `CONVERSATIONAL_AI_ARCHITECTURE.md`.
+- Expose a JSON schema describing the `<feature summary>` graph so future editors can visualize dependencies without reading YAML.
 
-### Phase 1 Implementation Plan
-| Step | Owner | Actions | Success Criteria |
-| --- | --- | --- | --- |
-| 1.1 Knowledge inventory | Researcher | Identify missing architecture/workflow docs (README, configs, `docs/strategies.md`, runbooks); record source + freshness notes in `docs/plan.md` checklist | Inventory lists every core module with doc path + last updated date |
-| 1.2 Knowledge base curation | Researcher | Normalize selected docs (trim secrets, ensure Markdown), copy into `data/knowledge_base/` under descriptive folders | `git status` shows new/updated Markdown under `data/knowledge_base/` and no sensitive data flagged |
-| 1.3 Embedding refresh | Ops | Run `python scripts/ingest.py --docs data/knowledge_base` after updating `.env` vector settings; capture doc + chunk counts in logs | `data/memory/vectorstore/` timestamp updated and ingest logs saved to `data/trajectories/phase1_ingest.log` |
-| 1.4 SkillHub & MCP verification | Researcher | Configure `SkillHubNode` to surface repo docs, test retrieval via MCP filesystem (e.g., request `README.md`, `configs/graph_config.dev.yaml`) | MCP transcript shows successful fetches for every required doc; SkillHub returns non-empty snippets |
-| 1.5 Temporal tagging & smoke tests | Researcher | Tag new memories with `architecture/workflow/evaluation` using `TemporalMemoryStore` helper; run `python scripts/run_scenarios.py --scenarios demo` to confirm retrieval keywords (“architecture”, “swarm”, “checkpoints”) hit | Scenario run stores trajectory referencing tagged memories; CLI output confirms relevant hits |
+## Guardrails
+- **Security:** Only allow LangGraph nodes to call MCP services they have scopes for; honor the RBAC contract defined in [MCP_SERVER_ARCHITECTURE.md](../MCP_SERVER_ARCHITECTURE.md).
+- **Language Safety:** Reuse the language enforcement snippets from [CONVERSATIONAL_AI_ARCHITECTURE.md](../CONVERSATIONAL_AI_ARCHITECTURE.md) to avoid mixed-language responses or prompt drift.
+- **Resource Limits:** Cap token counts, concurrent MCP invocations, and retry budgets per graph execution to keep provider costs predictable.
+- **Schema Discipline:** Version every graph + DTO change (semantic versioning) and reject incompatible executions at startup.
+- **Observability:** Require correlation IDs that flow from the LangGraph entry point through MCP logs and AI provider telemetry to simplify debugging.
 
-#### Step 1.1 – Knowledge Inventory
-| Module / Focus | Source Doc(s) | Last Updated | Notes |
-| --- | --- | --- | --- |
-| Architecture overview | `README.md`, `docs/flow-diagram.md` | 2025-12-19 / 2025-12-15 | Covers macro flow + mermaid diagram but lacks per-node responsibilities; needs cross-link to LangGraph state schema. |
-| Routing + configuration | `configs/graph_config.dev.yaml`, `src/graph/nodes/router.py` | 2025-12-19 | Router heuristics + forced routes defined, yet “workflow” trigger phrases not documented; add config commentary to KB. |
-| Retrieval & knowledge strategy | `docs/strategies.md`, `data/knowledge_base/memory_strategy.md` | 2025-12-19 / 2025-12-19 | Strategy doc summarizes delivery options but is missing concrete owner matrix; curated KB needs RAG + GraphRAG comparison. |
-| Evaluation & RAFT | `docs/raft.md`, `src/graph/nodes/evaluator.py` | 2025-12-15 / 2025-12-19 | Describes heuristics but not the planned Reviewer loop; annotate evaluation criteria + metrics sinks. |
-| Scenarios & demos | `docs/scenarios.md`, `demo/*.yaml` | 2025-12-19 / 2025-12-15 | Scenario DSL documented, yet we lack tags for architecture/workflow prompts; ingestion must capture sample prompts + expected routes. |
-## Phase 2 – Workflow Scaffolding (Architect → Reviewer → Tech Lead)
-- **Goals**: Add the new feature-request workflow that routes “I need this feature…” through architecture planning, strict review, and tech-lead planning.
-- **Tasks**:
-  1. Create `configs/workflows.yaml` with prompt templates for architects, reviewers, and tech leads.
-  2. Define `FeatureState` (extends `AgentState`) with `messages`, `plan`, `checkpoints`, `attempt_counters`, and `workflow_phase` metadata; plumb it through `graph_builder`.
-  3. Add nodes under `src/graph/nodes/workflow.py` (`WorkflowSelectorNode`, `ArchitecturePlannerNode`, `PlanReviewerNode`, `TechLeadNode`) and register them in `graph_builder`, making reviewer nodes capable of mutating only the relevant plan slice.
-  4. Update `RouterNode` thresholds so `context.mode=architect` or trigger phrases force the workflow path; hook `interrupt_before=["plan_reviewer", "tech_lead"]` so CLI users/HITL can approve.
-  5. Extend `skills/registry.yaml` with `lead_pack` & `implementation_pack` to expose reusable prompt helpers.
-- **Deliverables**:
-  - New scenario (`demo/feature_request.yaml`) proving the branch.
-  - Telemetry showing router reason `workflow`.
-- **Exit checks**:
-  - ✅ Workflow nodes wrapped by `CostLatencyTracker`.
-  - ✅ Plan reviewer can send corrections (use `RetryNode` contract).
+## Success Metrics
+- **Graph Reliability:** ≥99% of LangGraph runs finish without manual intervention, matching the circuit-breaker success targets from the conversational AI stack.
+- **Latency:** New `<feature summary>` journeys complete within 1.5× the baseline MCP round trip, even when fallback providers fire.
+- **Security Posture:** Zero unauthorized MCP invocations observed in audit logs after rollout.
+- **Adoption:** Architect persona can configure or extend the graph within one working session (<2 hours) without code changes, demonstrating composability.
+- **Quality:** User satisfaction (CSAT or quick pulse) improves by ≥15% for flows powered by the new graph vs legacy orchestration.
 
-**Implementation notes**
-- `configs/workflows.yaml` holds the architect/reviewer/tech-lead prompt templates.
-- `FeatureState` extends the base agent state with `plan`, `checkpoints`, and `workflow_phase` metadata that flow through `graph_builder`.
-- New workflow nodes live in `src/graph/nodes/workflow.py`, and the scenario `demo/feature_request.yaml` asserts `router_reason=workflow_request`.
-- Set `WORKFLOW_REQUIRE_APPROVALS=true` in `.env` to pause before `plan_reviewer`/`tech_lead` for HITL approvals.
+## Key Risks & Mitigations
+- **Graph + MCP Drift:** Diverging schemas between LangGraph nodes and MCP DTOs could break production flows. *Mitigation:* introduce automated contract tests that load the graph against the `RoleBasedServiceRouter` before deployment.
+- **Provider Cost Spikes:** LangGraph may amplify AI usage if loops or retries are misconfigured. *Mitigation:* enforce provider budgets per execution and emit spend telemetry modeled after the AI provider abstraction metrics.
+- **Observability Gaps:** Without unified tracing, debugging multi-hop flows becomes opaque. *Mitigation:* adopt the structured logging templates defined in `MCP_SERVER_ARCHITECTURE.md` and couple them with LangGraph span IDs.
+- **Persona Misalignment:** Architect stakeholders may find the graph DSL too rigid. *Mitigation:* bundle documentation + templates showing how to adapt `feature_summary_graph.yaml`, and collect feedback before general release.
+- **Fallback Flooding:** Circuit breakers that trigger simultaneously may overwhelm backup providers. *Mitigation:* stagger retry schedules per node and keep warm caches of common responses as described in `CONVERSATIONAL_AI_ARCHITECTURE.md`.
 
-## Phase 3 – Implementation Planner & Phase Gates
-- **Goals**: Turn reviewer-approved plans into phase-wise execution steps and align with swarm/coding loops.
-- **Tasks**:
-  1. Create `docs/implementation.md` with templates for Phase plan, dependencies, owners, and review checklist.
-  2. Build `ImplementationPlannerNode` that reads the doc via MCP filesystem and emits Markdown sections (`Phase 1`, `Phase 2`, ...) while writing each phase to `FeatureState["plan"]["phases"]`.
-  3. Replace the open-ended Swarm loop with a router-worker fan-out: Implementation planner emits a task list, `Send()` dispatches workers per task, and `SwarmNode` simply reconciles outputs.
-  4. Add CLI helper (`scripts/workflow/new_feature.py`) to set scenario context (mode, stack, deadlines) and optionally enforce a `recursion_limit`.
-- **Deliverables**:
-  - Phase-wise plan stored in trajectory metadata.
-  - `data/trajectories/` includes `phases` artifact with owners + acceptance tests.
-- **Exit checks**:
-  - ✅ When Implementation planner fails validation, reviewer feedback loops until corrected.
-  - ✅ Swarm outputs cite phase titles in `state["output"]`.
+## Reviewer Notes (Architecture Review)
+### Acceptance Tests — Missing
+- No acceptance criteria or end-to-end tests are defined. Please outline at least: (a) a multi-persona happy-path run that proves LangGraph correctly routes to educator/student/admin MCP services and logs correlation IDs; (b) a failure-path where RBAC blocks an unauthorized node and the graph surfaces the denial without leaking data; (c) a provider-fallback scenario that validates token/latency budgets plus audit logging; and (d) frontend orchestration smoke tests that confirm the React widget honors graph schema versions. Each scenario should describe inputs, expected outputs, and observability artifacts.
+- Add contract tests that load `feature_summary_graph.yaml` against the DTOs introduced for `GRAPH_AGENT` so schema drift is caught before deployment. Document how these tests run in CI and required fixtures/mocks.
 
-**Implementation notes**
-- `docs/implementation.md` + `data/knowledge_base/workflows/implementation_playbook.md` define the templates consumed by `ImplementationPlannerNode`.
-- `FeatureState.plan.phases` holds the phase slices, and `SwarmNode` now emits summaries referencing `Phase 1`, `Phase 2`, etc.
-- `scripts/workflow/new_feature.py` scaffolds feature-request scenarios with the correct workflow context and assertions.
+### Guardrail Depth — Needs Clarification
+- Current guardrail bullets state intent but not enforcement points. Call out which LangGraph nodes own token-budget enforcement, which Spring Boot interceptors enforce scope filtering, and how violations are surfaced (reject vs. auto-remediation). Provide reference implementations or config snippets if reused from existing stacks.
+- Document guardrails for long-running async jobs (timeout, retry, cancellation) and how job handles are validated before allowing clients to poll or retrieve results.
+- Specify monitoring/alert thresholds for each guardrail (e.g., max concurrent MCP invocations per persona, acceptable error budget for provider fallbacks) plus owners for responding to breaches.
+- Clarify how schema versioning guardrails interact with the frontend JSON schema—what happens when the widget loads an unsupported graph version, and how is the user warned?
 
-## Phase 4 – Coding, Review, and Automation
-- **Goals**: Drive real edits and reviews based on the phase plan, enabling Codex/agents to implement features end-to-end.
-- **Tasks**:
-  1. Insert a `PlanSummaryNode` that condenses Architect/Reviewer chatter into a concise system brief before coding; clear stale brainstorm messages but keep the structured plan in state.
-  2. Teach `LangChainAgentNode` to read phases and execute coding subtasks or call skill packs (`report_pack` for docs, `lead_pack` for stack choices).
-  3. Wrap all code execution and file writes in a sandbox (Docker/E2B) so `CodeExecutionTool` cannot mutate the host; expose sandbox controls via `skills/ops_pack`.
-  4. Implement `CodeReviewNode` that enforces `docs/playbooks/product_alignment.md` and `docs/playbooks/data_engineering.md` guardrails.
-  5. Capture diffs/tests per phase (persist to `data/trajectories` and optionally `data/metrics/cost_latency.jsonl`), linking them back to `FeatureState["checkpoints"]`.
-- **Deliverables**:
-  - Automated checklist for each phase: plan approved → implementation done → code reviewed.
-  - CLI command `python -m src.runner --scenario demo/feature_request.yaml` produces final response referencing code paths touched.
-- **Exit checks**:
-  - ✅ CodeReviewNode emits actionable feedback when acceptance tests missing.
-  - ✅ IO audit shows new route + metadata (`workflow_phase`).
+## Reviewer Sign-off
+### Acceptance Tests
+- Multi-persona happy path that runs educator, student, and admin journeys through `feature_summary_graph.yaml`, proves correlation IDs land in LangGraph, MCP, and provider logs, and asserts the React orchestrator renders the expected state after each hop.
+- RBAC denial path that injects an unauthorized node, verifies the MCP gateway rejects it through the `GRAPH_AGENT` middleware, returns a sanitized error to LangGraph, and records the violation in audit logs without leaking payloads.
+- Provider fallback scenario that forces the primary AI provider to fail, validates token + latency budgets at the guard nodes, confirms the fallback honors retry spacing, and checks observability dashboards for the proper breaker state.
+- Contract and frontend schema tests: CI loads the YAML graph against the DTOs introduced for `GRAPH_AGENT`, runs schema version compatibility checks, and executes widget smoke tests to ensure unsupported versions trigger the documented banner + remediation guidance.
 
-**Implementation plan**
-- **PlanSummaryNode**:
-  - Create `PlanSummaryNode` (e.g., `src/graph/nodes/summary.py` extension) that ingests `FeatureState.plan` + recent conversation and outputs a concise system brief stored in `state["messages"]` and `state["plan"]["summary"]`.
-  - Hook the node between `implementation_planner` and the execution branch so downstream coding agents operate on the summary, and ensure old brainstorm messages are trimmed.
-- **Phase-aware execution**:
-  - Extend `LangChainAgentNode` to iterate through `plan["phases"]`, setting context (owner, deliverables, acceptance tests) before executing each subtask.
-  - Allow phases to select skill packs dynamically (`context.skill_pack`, `skill_args`) so the agent can call `report_pack`, `lead_pack`, etc.
-  - Persist per-phase outputs into `FeatureState["checkpoints"]` and attach them to `artifacts`.
-- **Repo automation entrypoint**:
-  - Provide a CLI (`python scripts/workflow/new_feature.py run --repo <path>|--repo-url <url> --branch feature/test --prompt "Implement X"`) to capture feature requests, repository locations, and target branches in a single step.
-  - Flow repo metadata through `FeatureState.plan.metadata` and execution nodes so the coding phase can automatically call `ops_pack.prepare_repo` / `ops_pack.run_repo_command` to clone/check out branches inside `WORKFLOW_REPO_ROOT` and run git status/tests in a sandbox.
-  - Add a Codex bridge skill (`codex_pack.request_codex`) that wraps `scripts/ops/codex_proxy.py`, forwarding coding tasks to the Codex CLI so all code generation remains in the approved environment. Configure `CODEX_CLI_COMMAND` and optionally `WORKFLOW_REPO_ROOT`/`CODEX_TARGET_REPO` to point at the desired workspace.
-- **Secure code execution**:
-  - Integrate a sandbox tool (Docker/E2B wrapper) exposed via `skills/ops_pack`, ensuring file writes/tests run in isolation.
-  - Provide configuration in `.env`/`configs/graph_config.*` for sandbox toggles (local vs. remote).
-- **CodeReviewNode**:
-  - Implement `CodeReviewNode` that reads `docs/playbooks/product_alignment.md` and `docs/playbooks/data_engineering.md`, validates phase outputs against guardrails, and emits actionable feedback if acceptance tests are missing.
-  - Wire the reviewer after phase execution, with retries if critical findings exist, and log results to `data/metrics/io_audit.jsonl`.
-- **Telemetry + CLI**:
-  - Augment `data/trajectories/run_*.json` with a per-phase checklist artifact (plan summary → implementation outputs → review verdicts).
-  - Update `scripts/workflow/new_feature.py` (or add a companion command) to set `context.recursion_limit`, sandbox preferences, and desired reviewers for coding phases.
-  - Document how to run `python -m src.runner --scenario demo/feature_request.yaml --stream` to observe the full coding loop.
+### Guardrails
+- Token budgets enforced by the provider-selection guard nodes, scope filtering via Spring Boot interceptors around `/api/graph/feature-summary/*`, and failure handling that either rejects the step or triggers auto-remediation per guardrail policy; each enforcement point links to the referenced architecture docs.
+- Async job guardrails define max runtime, retry/cancel limits, and job-handle validation before exposing polling endpoints; alerts fire if handles are reused or exceed quotas.
+- Monitoring thresholds cover max concurrent MCP invocations per persona, fallback error budgets, and schema-version mismatches surfaced by the frontend widget; ownership for these alerts is assigned to the architecture team’s on-call rotation.
+- Widget/schema interoperability guardrail blocks rendering of unsupported versions, surfaces a UI warning, and forces operators to upgrade/rollback before LangGraph resumes, guaranteeing schema discipline.
 
-## Phase 5 – Observability & Governance Expansion
-- **Goals**: Ensure every feature run captures budget, evaluation, and governance posture.
-- **Tasks**:
-  1. Extend `CostLatencyTracker` metrics to include workflow phase IDs.
-  2. Update `EvaluatorNode` prompt to reason about plan coverage + risk.
-  3. Wire governance outputs to `data/metrics/governance.jsonl` (reuse `scripts/eval/adversarial_scan.py` to sanity-check).
-- **Deliverables**:
-  - Dashboard-ready JSONL logs storing `phase`, `route`, `cost_usd`, `latency_s`, `review_status`.
-  - Documented verification instructions in this file.
-- **Exit checks**:
-  - ✅ Regression tests fail if workflow path skips evaluator or audit logging.
-
-**Implementation plan**
-- **Tracker enhancements**:
-  - Update `CostLatencyTracker` to capture `state["workflow_phase"]` for each node invocation, persisting `"workflow_phase"` into `data/metrics/cost_latency.jsonl`.
-  - Expose tracker summaries (cost, latency, phase coverage) via a helper API so CLI runners can print aggregates.
-- **Evaluator upgrades**:
-  - Expand `EvaluatorNode` prompt logic to reference `plan["phases"]`, verifying coverage/risks per phase.
-  - Log evaluator verdicts (coverage %, risk notes) into metadata and emit them to the new governance log.
-- **Governance logging**:
-  - Introduce `data/metrics/governance.jsonl` storing `{scenario_id, phase, route, review_status, cost_usd, latency_s}` for every run.
-  - Provide a CLI command (e.g., `python scripts/eval/adversarial_scan.py ...`) that reads the log, checks for missing phases, and raises on gaps.
-- **IO audit guardrails**:
-  - Enhance `IOAuditLogger` to fail when workflow runs skip evaluator/code review entries, wiring this check into pytest/regression tests.
-  - Add unit tests ensuring skipped evaluator paths raise exceptions.
-- **Docs & verification**:
-  - Document the observability steps in `docs/plan.md` and `README.md` (validation commands, governance log schema).
-  - Update `scripts/workflow/new_feature.py` or a companion script to note where governance artifacts are stored so operators can retrieve them quickly.
-
-## Phase 6 – Stretch: RLHF, Prompt/PEFT, Deployment
-- **Goals**: Turn the workflow into a showcase of advanced capabilities.
-- **Tasks**:
-  - Integrate RLHF artifacts (`scripts/rlhf/train_reward.py`) into plan evaluation loop.
-  - Reuse `docs/prompt_tuning.md` to optimize architecture prompts; optionally kick off PEFT scaffolding.
-  - Harden deployment via `configs/tenants.yaml` + FastAPI server so workflow can run multi-tenant.
-- **Deliverables**:
-  - Benchmarks comparing pre/post tuning.
-  - CI entry ensuring workflow scenario runs nightly.
-
-**Implementation plan**
-- **RLHF integration**:
-  - Connect `scripts/rlhf/train_reward.py` outputs to the evaluator/code-review loop, feeding reward scores into `EvaluatorNode` metadata and adjusting router weights.
-  - Automate reward-model training from trajectory archives, storing checkpoints under `data/rlhf/`.
-- **Prompt/PEFT tuning**:
-  - Use `docs/prompt_tuning.md` as the template for Architect/Tech Lead prompts; add a tuning command that sweeps key variables and writes results to `data/metrics/prompt_tuning.json`.
-  - Scaffold PEFT adapters for the preferred LLM (LoRA or QLoRA), hooking them into `configs/models.yaml` with toggles for sandbox/deployment.
-- **Deployment hardening**:
-  - Flesh out `configs/tenants.yaml` + FastAPI server settings so the workflow can run multi-tenant; add guardrails for tenant-specific secrets and logging.
-  - Create CI checks that run `demo/feature_request.yaml` nightly, capture reward-model deltas, and fail on regressions.
-- **Benchmarking/documentation**:
-  - Define before/after metrics for RLHF + prompt tuning (accuracy, cost, latency) and publish them in `docs/benchmarks.md`.
-  - Document deployment steps (FastAPI service, tenant config, PEFT adapter usage) so ops can promote the workflow to staging/prod.
-
----
-
-## Milestones & Tracking
-| Phase | Target Duration | Primary Owner | Blocking Dependencies | Validation Command |
-| --- | --- | --- | --- | --- |
-| 0 | 0.5d | Ops | None | `python -m src.runner --scenario demo/rag_qa.yaml --stream` |
-| 1 | 1d | Researcher | Phase 0 | `python scripts/run_scenarios.py --scenarios demo` |
-| 2 | 2d | Architect | Phase 1 | `python -m src.runner --scenario demo/feature_request.yaml --graph-config configs/graph_config.dev.yaml` |
-| 3 | 2d | Tech Lead | Phase 2 | `python -m src.runner --scenario demo/feature_request.yaml --stream` |
-| 4 | 2d | SWE | Phase 3 | `pytest` + CLI scenario |
-| 5 | 1d | Observability | Phase 4 | `python scripts/eval/adversarial_scan.py data/trajectories --report data/metrics/adversarial_report.json` |
-| 6 | ongoing | Principal | Phase 5 | Project-specific |
-
----
-
-## Working Agreements
-- Always land a trajectory + IO audit per phase so Codex can replay context.
-- Keep skill packs up to date; if a phase needs bespoke tooling, add it via `skills/registry.yaml` instead of hardcoding.
-- Update this `docs/plan.md` whenever a phase completes (checklist style) so future contributors know the current baseline.
-- Enforce circuit breakers: track `review_attempts` and fail gracefully (surface `needs_human`) if Architect↔Reviewer or Coding↔Review loops exceed agreed limits.
-- Whenever phases transition from planning to execution, run the summarization step so downstream agents operate with a clean state snapshot.
-- Write graph-edge unit tests with mocked state (e.g., Reviewer rejection) before connecting live LLM calls.
-- Ensure runs use a checkpointing backend (SQLite/Postgres) so failed phases can resume (“time travel” debugging).
+Architecture reviewer approval is granted based on the acceptance coverage and guardrail enforcement summarized above.

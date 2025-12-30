@@ -54,3 +54,6 @@
 {"scenario_id":"graphrag","valid_input":true,"valid_output":true,"route":"rag","errors":[]}
 {"scenario_id":"rag_qa","valid_input":true,"valid_output":true,"route":"rag","errors":[]}
 {"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","errors":[]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","errors":[]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","errors":[]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","errors":[]}

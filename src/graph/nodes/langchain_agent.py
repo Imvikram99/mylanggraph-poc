@@ -41,7 +41,22 @@ class LangChainAgentNode:
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         plan = state.get("plan") or {}
         phases = plan.get("phases") or []
+        context = state.get("context") or {}
+        plan_only = context.get("plan_only") or plan.get("metadata", {}).get("plan_only")
         if phases:
+            if plan_only:
+                metadata = state.setdefault("metadata", {})
+                phase_exec = metadata.setdefault("phase_execution", {})
+                note = "Plan-only mode enabled; skipping execution phases."
+                summary = plan.get("summary") or plan.get("request") or "Planning complete"
+                summary = f"{summary} (execution skipped)" if plan.get("summary") else summary
+                phase_exec["skipped"] = "plan_only"
+                phase_exec["reason"] = note
+                state.setdefault("messages", []).append({"role": "system", "content": note})
+                state["workflow_phase"] = "plan_only"
+                state["output"] = summary
+                console.log("[yellow]LangChainAgent[/] skipping execution (plan-only mode)")
+                return state
             return self._execute_phases(state, phases)
         query = _last_user_content(state.get("messages", []))
         if not query:

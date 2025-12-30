@@ -62,6 +62,7 @@ class WorkflowSelectorNode:
                 "repo_url": context.get("repo_url"),
                 "target_branch": context.get("target_branch") or context.get("branch"),
                 "feature_request": context.get("feature_request") or request,
+                "plan_only": context.get("plan_only"),
             }
         )
         state.setdefault("checkpoints", [])

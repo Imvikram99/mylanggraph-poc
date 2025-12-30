@@ -14,6 +14,8 @@ import typer
 
 LOG_PATH = Path("data/ops/codex_requests.jsonl")
 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+PROMPT_LOG_PATH = Path("docs/codex_prompts.md")
+PROMPT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 app = typer.Typer(help="Relay workflow instructions to the Codex CLI.")
 
@@ -37,9 +39,8 @@ def dispatch(
         "branch": branch,
     }
     _append_log(payload)
-    cli_cmd = os.getenv("CODEX_CLI_COMMAND") or os.getenv("CODEX_CLI_BIN")
-    if not cli_cmd:
-        return f"[codex_proxy] Set CODEX_CLI_COMMAND to forward requests. Logged to {LOG_PATH}."
+    _append_prompt_markdown(payload)
+    cli_cmd = os.getenv("CODEX_CLI_COMMAND") or os.getenv("CODEX_CLI_BIN") or "codex exec --dangerously-bypass-approvals-and-sandbox"
     formatted = _format_instruction(payload)
     env = os.environ.copy()
     if resolved_repo:
@@ -50,14 +51,16 @@ def dispatch(
     if dry_run:
         return f"[codex_proxy] Dry-run: would run '{cli_cmd}' with instruction logged at {LOG_PATH}."
     try:
+        cmd = split(cli_cmd)
+        cmd.append(formatted)
         proc = subprocess.run(
-            split(cli_cmd),
-            input=formatted,
+            cmd,
             text=True,
             capture_output=True,
             timeout=timeout_s,
             env=env,
             check=False,
+            cwd=str(resolved_repo) if resolved_repo else None,
         )
     except FileNotFoundError:
         return f"[codex_proxy] CLI command '{cli_cmd}' not found. Logged to {LOG_PATH}."
@@ -83,6 +86,18 @@ def run(
 def _append_log(entry: dict) -> None:
     with LOG_PATH.open("a", encoding="utf-8") as fout:
         fout.write(json.dumps(entry) + "\n")
+
+
+def _append_prompt_markdown(payload: dict) -> None:
+    if not PROMPT_LOG_PATH.exists():
+        PROMPT_LOG_PATH.write_text("# Codex Prompts Log\n\n", encoding="utf-8")
+    repo = payload.get("repo_path") or "unspecified"
+    branch = payload.get("branch") or "current"
+    ts = payload.get("ts")
+    instruction = payload.get("instruction", "").strip().replace("\n", " ")
+    line = f"- {ts}: `{instruction}` _(repo: {repo}, branch: {branch})_\n"
+    with PROMPT_LOG_PATH.open("a", encoding="utf-8") as fout:
+        fout.write(line)
 
 
 def _format_instruction(payload: dict) -> str:

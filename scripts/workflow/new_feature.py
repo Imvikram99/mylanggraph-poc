@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from src.runner import execute_scenario  # noqa: E402
+from skills.ops_pack.tools import prepare_repo  # noqa: E402
 
 app = typer.Typer(help="Scaffold feature-request scenario files or run them directly.")
 
@@ -28,6 +29,7 @@ def _build_scenario(
     repo_url: Optional[str],
     repo_branch: Optional[str],
     feature: Optional[str],
+    plan_only: bool = False,
 ) -> dict:
     context = {
         "persona": persona,
@@ -45,6 +47,8 @@ def _build_scenario(
         context["target_branch"] = repo_branch
     if feature:
         context["feature_request"] = feature
+    if plan_only:
+        context["plan_only"] = True
     scenario = {
         "prompt": prompt,
         "context": context,
@@ -85,9 +89,21 @@ def create(
         "-o",
         help="Path where the scenario YAML will be written.",
     ),
+    plan_only: bool = typer.Option(False, "--plan-only", help="Embed plan-only mode in the scenario."),
 ):
     """Create a scenario YAML with the workflow context pre-populated."""
-    scenario = _build_scenario(prompt, persona, stack, scenario_id, deadline, repo, repo_url, repo_branch, feature)
+    scenario = _build_scenario(
+        prompt,
+        persona,
+        stack,
+        scenario_id,
+        deadline,
+        repo,
+        repo_url,
+        repo_branch,
+        feature,
+        plan_only,
+    )
     _write_scenario(scenario, output)
     typer.secho(f"Scenario written to {output}", fg=typer.colors.GREEN)
 
@@ -106,12 +122,36 @@ def run_feature(
     graph_config: Path = typer.Option(Path("configs/graph_config.dev.yaml"), "--graph-config", help="Graph config to use."),
     stream: bool = typer.Option(False, "--stream", help="Stream workflow events."),
     save: Optional[Path] = typer.Option(None, "--save", "-o", help="Optional path to save the generated scenario."),
+    prep_only: bool = typer.Option(False, "--prep-only", help="Only prepare the repo/branch and exit without running the workflow."),
+    plan_only: bool = typer.Option(False, "--plan-only", help="Stop after planning (skip repo execution/Codex phases)."),
 ):
     """Create and immediately run a feature workflow scenario."""
-    scenario = _build_scenario(prompt, persona, stack, scenario_id, deadline, repo, repo_url, repo_branch, feature)
+    scenario = _build_scenario(
+        prompt,
+        persona,
+        stack,
+        scenario_id,
+        deadline,
+        repo,
+        repo_url,
+        repo_branch,
+        feature,
+        plan_only,
+    )
     if save:
         _write_scenario(scenario, save)
         typer.secho(f"Scenario written to {save}", fg=typer.colors.BLUE)
+    if prep_only:
+        repo_path_str = str(repo) if repo else None
+        prep_log = prepare_repo(
+            repo_path=repo_path_str,
+            repo_url=repo_url,
+            branch=repo_branch,
+            feature=feature,
+        )
+        typer.secho("Prep-only mode enabled. Skipping workflow execution.", fg=typer.colors.YELLOW)
+        typer.echo(prep_log or "No repo log generated.")
+        raise typer.Exit()
     scenario_name = scenario["context"].get("scenario_id", scenario_id)
     result = execute_scenario(scenario, scenario_name, stream=stream, graph_config=graph_config)
     typer.secho(f"Route: {result.get('route')}", fg=typer.colors.CYAN)
