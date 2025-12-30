@@ -34,4 +34,5 @@ class IOAuditRecord(BaseModel):
     valid_input: bool
     valid_output: bool
     route: Optional[str]
+    workflow_phase: Optional[str] = None
     errors: List[str] = Field(default_factory=list)

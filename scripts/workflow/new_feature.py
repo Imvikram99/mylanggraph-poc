@@ -153,7 +153,13 @@ def run_feature(
         typer.echo(prep_log or "No repo log generated.")
         raise typer.Exit()
     scenario_name = scenario["context"].get("scenario_id", scenario_id)
-    result = execute_scenario(scenario, scenario_name, stream=stream, graph_config=graph_config)
+    result = execute_scenario(
+        scenario,
+        scenario_name,
+        stream=stream,
+        graph_config=graph_config,
+        save_trajectory=True,
+    )
     typer.secho(f"Route: {result.get('route')}", fg=typer.colors.CYAN)
     typer.secho(f"Output:\n{result.get('output')}", fg=typer.colors.GREEN)
 

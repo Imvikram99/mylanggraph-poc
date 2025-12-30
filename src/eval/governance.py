@@ -43,7 +43,10 @@ class GovernanceLogger:
         records = []
         if phases:
             for phase in phases:
-                record = {**base_record, "phase": phase.get("name"), "owner": phase.get("owner")}
+                owners = phase.get("owners") or []
+                if not owners and phase.get("owner"):
+                    owners = [phase.get("owner")]
+                record = {**base_record, "phase": phase.get("name"), "owners": owners}
                 records.append(record)
         else:
             records.append({**base_record, "phase": state.get("workflow_phase")})

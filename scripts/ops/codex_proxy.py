@@ -24,6 +24,9 @@ def dispatch(
     instruction: str,
     repo_path: Optional[str] = None,
     branch: Optional[str] = None,
+    session_id: Optional[str] = None,
+    session_name: Optional[str] = None,
+    phase: Optional[str] = None,
     *,
     dry_run: bool = False,
 ) -> str:
@@ -32,15 +35,19 @@ def dispatch(
     if not instruction:
         return "[codex_proxy] No instruction supplied."
     resolved_repo = Path(repo_path).expanduser() if repo_path else None
+    cli_cmd = os.getenv("CODEX_CLI_COMMAND") or os.getenv("CODEX_CLI_BIN") or "codex exec"
     payload = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "instruction": instruction,
         "repo_path": str(resolved_repo) if resolved_repo else None,
         "branch": branch,
+        "phase": phase,
+        "session_id": session_id,
+        "session_name": session_name,
+        "cli_command": cli_cmd,
     }
     _append_log(payload)
     _append_prompt_markdown(payload)
-    cli_cmd = os.getenv("CODEX_CLI_COMMAND") or os.getenv("CODEX_CLI_BIN") or "codex exec --dangerously-bypass-approvals-and-sandbox"
     formatted = _format_instruction(payload)
     env = os.environ.copy()
     if resolved_repo:
@@ -75,12 +82,25 @@ def run(
     instruction: str = typer.Argument(..., help="Instruction payload for Codex CLI."),
     repo: Optional[Path] = typer.Option(None, "--repo", help="Repository path"),
     branch: Optional[str] = typer.Option(None, "--branch", help="Target Git branch."),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Session identifier for Codex CLI."),
+    session_name: Optional[str] = typer.Option(None, "--session-name", help="Session label for Codex CLI."),
+    phase: Optional[str] = typer.Option(None, "--phase", help="Workflow phase for the Codex request."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Skip calling CLI, log only."),
     cli_command: Optional[str] = typer.Option(None, "--cli-command", help="Command used to invoke Codex CLI."),
 ):
     if cli_command:
         os.environ["CODEX_CLI_COMMAND"] = cli_command
-    typer.echo(dispatch(instruction, repo_path=str(repo) if repo else None, branch=branch, dry_run=dry_run))
+    typer.echo(
+        dispatch(
+            instruction,
+            repo_path=str(repo) if repo else None,
+            branch=branch,
+            session_id=session_id,
+            session_name=session_name,
+            phase=phase,
+            dry_run=dry_run,
+        )
+    )
 
 
 def _append_log(entry: dict) -> None:
@@ -93,9 +113,11 @@ def _append_prompt_markdown(payload: dict) -> None:
         PROMPT_LOG_PATH.write_text("# Codex Prompts Log\n\n", encoding="utf-8")
     repo = payload.get("repo_path") or "unspecified"
     branch = payload.get("branch") or "current"
+    phase = payload.get("phase") or "unspecified"
+    session = payload.get("session_name") or payload.get("session_id") or "unspecified"
     ts = payload.get("ts")
     instruction = payload.get("instruction", "").strip().replace("\n", " ")
-    line = f"- {ts}: `{instruction}` _(repo: {repo}, branch: {branch})_\n"
+    line = f"- {ts}: `{instruction}` _(repo: {repo}, branch: {branch}, phase: {phase}, session: {session})_\n"
     with PROMPT_LOG_PATH.open("a", encoding="utf-8") as fout:
         fout.write(line)
 

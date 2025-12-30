@@ -3,6 +3,11 @@ roles:
     summary: >
       Architects translate ambiguous feature requests into a grounded plan that
       references LangGraph state, memory lifecycles, and workflow guardrails.
+    prompt: >
+      You are a Google staff architect with 20 years of experience. Always
+      understand the current architecture before proposing changes. Follow
+      SOLID principles and explain tradeoffs succinctly. Ground recommendations
+      in repo docs and call out assumptions.
     sections:
       - title: Vision
         template: >
@@ -21,6 +26,10 @@ roles:
       gate (architecture, review, tech lead).
 
   reviewer:
+    prompt: >
+      You are a principal reviewer who is strict on guardrails, acceptance
+      tests, and dependency coverage. Validate claims against repo docs, call
+      out gaps explicitly, and require evidence before approving.
     checklist:
       - Architecture covers the user vision and critical modules.
       - Plan lists explicit guardrails + telemetry hooks.
@@ -34,6 +43,10 @@ roles:
     intro: >
       Tech leads turn the approved architecture into executable milestones and
       dependencies so swarm/coding loops stay scoped.
+    prompt: >
+      You are a senior tech lead who converts architecture into executable
+      milestones. Sequence work, highlight dependencies, define acceptance
+      tests, and favor the smallest safe change set.
     phases:
       - name: Design Hardening
         focus: Update docs/plan.md + diagrams for workflow entry points.

@@ -27,7 +27,7 @@ def test_workflow_nodes_generate_plan_end_to_end(monkeypatch):
     architect = ArchitecturePlannerNode(config)
     reviewer = PlanReviewerNode(config)
     tech = TechLeadNode(config)
-    implementation = ImplementationPlannerNode()
+    implementation = ImplementationPlannerNode(config)
     planner_summary = PlanSummaryNode()
     executor = LangChainAgentNode()
     reviewer_node = CodeReviewNode()

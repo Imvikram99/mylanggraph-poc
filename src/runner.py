@@ -98,10 +98,14 @@ def execute_scenario(
     *,
     stream: bool = False,
     graph_config: Path | None = None,
+    save_trajectory: bool = False,
 ):
     load_dotenv()
     scenario_input = payload if isinstance(payload, ScenarioInput) else _validate_input(payload, scenario_name)
-    return _execute_validated_scenario(scenario_input, scenario_name, stream=stream, graph_config=graph_config)
+    result = _execute_validated_scenario(scenario_input, scenario_name, stream=stream, graph_config=graph_config)
+    if save_trajectory:
+        _save_trajectory(result)
+    return result
 
 
 def stream_scenario(
@@ -245,6 +249,7 @@ def _validate_input(payload: Dict[str, Any], scenario_name: str) -> ScenarioInpu
                 valid_input=False,
                 valid_output=False,
                 route=None,
+                workflow_phase=None,
                 errors=[str(exc)],
             )
         )
@@ -258,6 +263,7 @@ def _audit_run(scenario_input: ScenarioInput, final_state: Dict[str, Any] | None
     error_list = list(errors or [])
     valid_output = False
     route = None
+    workflow_phase = _resolve_workflow_phase(final_state)
     if isinstance(final_state, dict):
         try:
             scenario_output = ScenarioOutput.model_validate(
@@ -281,9 +287,24 @@ def _audit_run(scenario_input: ScenarioInput, final_state: Dict[str, Any] | None
         valid_input=True,
         valid_output=valid_output,
         route=route,
+        workflow_phase=workflow_phase,
         errors=error_list,
     )
     audit_logger.log(record)
+
+
+def _resolve_workflow_phase(final_state: Dict[str, Any] | None) -> str | None:
+    if not isinstance(final_state, dict):
+        return None
+    phase = final_state.get("workflow_phase")
+    if phase in {"execution", "code_review"}:
+        return "implementation"
+    if phase:
+        return phase
+    plan = final_state.get("plan") or {}
+    if plan.get("phases"):
+        return "implementation"
+    return None
 
 
 def _scenario_identifier(payload: Dict[str, Any], scenario_name: str) -> str:

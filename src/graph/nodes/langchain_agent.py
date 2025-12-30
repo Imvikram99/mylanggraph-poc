@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from rich.console import Console
 
 from pathlib import Path
+from uuid import uuid4
 
 from skills.codex_pack.tools import request_codex
 from skills.ops_pack.tools import (
@@ -31,7 +32,8 @@ console = Console()
 class LangChainAgentNode:
     """Demonstrate LangChain AgentExecutor embedded inside LangGraph."""
 
-    def __init__(self) -> None:
+    def __init__(self, workflow_config: Dict[str, Any] | None = None) -> None:
+        self.role_prompts = self._load_role_prompts(workflow_config)
         self.available = AgentType is not None and FakeListLLM is not None and Tool is not None and initialize_agent
         if self.available:
             self.agent = self._build_agent()
@@ -96,24 +98,42 @@ class LangChainAgentNode:
         repo_ref = str(repo_workspace) if repo_workspace else None
         plan_request = (state.get("plan") or {}).get("request", "")
         for idx, phase in enumerate(phases, start=1):
-            owner = phase.get("owner", "architect")
+            owners = phase.get("owners") or []
+            if not owners and phase.get("owner"):
+                owners = [phase.get("owner")]
+            owner_label = ", ".join(str(owner) for owner in owners if str(owner).strip()) or "architect"
             deliverables = phase.get("deliverables") or []
-            acceptance = phase.get("acceptance") or []
+            acceptance = phase.get("acceptance_tests") or phase.get("acceptance") or []
             sandbox_cmd = f"phase_{idx}_{phase.get('name', 'unknown').replace(' ', '_').lower()}"
             if repo_workspace:
                 repo_cmd = run_repo_command(repo_workspace, f"git status -sb || echo '{sandbox_cmd}'")
             else:
                 repo_cmd = run_sandboxed(f"echo Executing {sandbox_cmd}")
+            phase_name = phase.get("name", f"Phase {idx}")
+            session = self._ensure_phase_session(phase_exec, phase_name, plan_request or "feature")
+            role_prompt = self._resolve_role_prompt(owners or [owner_label])
+            self._maybe_init_phase_session(
+                phase_exec,
+                phase_name,
+                session,
+                role_prompt,
+                repo_path=repo_ref,
+                branch=repo_branch,
+            )
             codex_result = self._invoke_codex(
                 phase_idx=idx,
                 phase=phase,
                 feature_request=plan_request,
                 repo_path=repo_ref,
                 branch=repo_branch,
+                session_id=session["id"],
+                session_name=session["name"],
+                phase_name=phase_name,
             )
             summary_lines = [
-                f"Phase {idx} – {phase.get('name', f'Phase {idx}')}",
-                f"Owner: {owner}",
+                f"Phase {idx} – {phase_name}",
+                f"Owner: {owner_label}",
+                f"Codex session: {session['id']}",
                 "Deliverables:",
             ]
             summary_lines.extend(f"  - {item}" for item in deliverables)
@@ -127,8 +147,16 @@ class LangChainAgentNode:
             summary_lines.append(f"Codex CLI: {codex_result}")
             phase_output = "\n".join(summary_lines)
             phase_outputs.append(phase_output)
-            checkpoints.append({"phase": phase.get("name", f"Phase {idx}"), "owner": owner, "status": "executed"})
-            phase_exec.setdefault("codex_calls", []).append({"phase": phase.get("name"), "result": codex_result})
+            checkpoints.append(
+                {
+                    "phase": phase_name,
+                    "owners": owners,
+                    "status": "executed",
+                }
+            )
+            phase_exec.setdefault("codex_calls", []).append(
+                {"phase": phase_name, "result": codex_result, "session_id": session["id"]}
+            )
         output = "\n\n".join(phase_outputs)
         phase_exec["count"] = len(phases)
         state["workflow_phase"] = "execution"
@@ -186,10 +214,20 @@ class LangChainAgentNode:
         feature_request: str,
         repo_path: str | None,
         branch: str | None,
+        session_id: str | None,
+        session_name: str | None,
+        phase_name: str | None,
     ) -> str:
         instruction = self._format_phase_instruction(phase_idx, phase, feature_request, repo_path, branch)
         try:
-            return request_codex(instruction, repo_path=repo_path, branch=branch)
+            return request_codex(
+                instruction,
+                repo_path=repo_path,
+                branch=branch,
+                session_id=session_id,
+                session_name=session_name,
+                phase=phase_name,
+            )
         except Exception as exc:  # pragma: no cover - defensive fallback
             console.log(f"[red]Codex bridge error[/] {exc}")
             return f"[codex] error: {exc}"
@@ -204,7 +242,7 @@ class LangChainAgentNode:
     ) -> str:
         name = phase.get("name") or f"Phase {idx}"
         deliverables = phase.get("deliverables") or []
-        acceptance = phase.get("acceptance") or []
+        acceptance = phase.get("acceptance_tests") or phase.get("acceptance") or []
         lines = [
             f"Feature request: {feature_request or 'unspecified'}",
             f"Phase: {name}",
@@ -223,6 +261,73 @@ class LangChainAgentNode:
             lines.append("- (not specified)")
         lines.append("Please implement this phase, run relevant tests, and ensure outputs align with guardrails.")
         return "\n".join(lines)
+
+    def _resolve_role_prompt(self, owners: List[str]) -> str | None:
+        for owner in owners:
+            role_key = self._normalize_role(str(owner))
+            prompt = self.role_prompts.get(role_key)
+            if prompt:
+                return prompt
+        return None
+
+    def _maybe_init_phase_session(
+        self,
+        phase_exec: Dict[str, Any],
+        phase_name: str,
+        session: Dict[str, str],
+        role_prompt: str | None,
+        *,
+        repo_path: str | None,
+        branch: str | None,
+    ) -> None:
+        role_prompt = (role_prompt or "").strip()
+        if not role_prompt:
+            return
+        session_inits = phase_exec.setdefault("session_inits", {})
+        if phase_name in session_inits:
+            return
+        init_payload = "\n".join(
+            [
+                "Session init.",
+                f"Role prompt: {role_prompt}",
+                "Reply with a short acknowledgement. Await the next task.",
+            ]
+        )
+        result = request_codex(
+            init_payload,
+            repo_path=repo_path,
+            branch=branch,
+            session_id=session["id"],
+            session_name=session["name"],
+            phase=phase_name,
+        )
+        session_inits[phase_name] = {"session_id": session["id"], "result": result}
+
+    @staticmethod
+    def _ensure_phase_session(phase_exec: Dict[str, Any], phase_name: str, feature_request: str) -> Dict[str, str]:
+        sessions = phase_exec.setdefault("sessions", {})
+        session = sessions.get(phase_name)
+        if session:
+            return session
+        session_id = uuid4().hex
+        session_name = f"{feature_request}:{phase_name}"
+        session = {"id": session_id, "name": session_name}
+        sessions[phase_name] = session
+        return session
+
+    @staticmethod
+    def _normalize_role(value: str) -> str:
+        return value.strip().lower().replace(" ", "_").replace("-", "_")
+
+    def _load_role_prompts(self, workflow_config: Dict[str, Any] | None) -> Dict[str, str]:
+        prompts: Dict[str, str] = {}
+        if not workflow_config:
+            return prompts
+        for key, role in (workflow_config.get("roles") or {}).items():
+            prompt = (role or {}).get("prompt")
+            if prompt:
+                prompts[self._normalize_role(str(key))] = str(prompt)
+        return prompts
 
 
 def _last_user_content(messages: List[Dict[str, Any]]) -> str:

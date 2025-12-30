@@ -52,7 +52,14 @@ class CodeReviewNode:
         issues: List[str] = []
         for idx, phase in enumerate(phases, start=1):
             name = phase.get("name", f"Phase {idx}")
-            acceptance = phase.get("acceptance") or []
+            owners = phase.get("owners") or []
+            if not owners and phase.get("owner"):
+                owners = [phase.get("owner")]
+            owners = [str(owner).strip() for owner in owners if str(owner).strip()]
+            if not owners:
+                issues.append(f"{name}: missing owners")
+            acceptance = phase.get("acceptance_tests") or phase.get("acceptance") or []
+            acceptance = [str(item).strip() for item in acceptance if str(item).strip()]
             if not acceptance:
                 issues.append(f"{name}: missing acceptance tests")
             elif not any("demo/" in entry or "pytest" in entry.lower() for entry in acceptance):

@@ -18,7 +18,7 @@ def test_governance_logger(tmp_path):
         "output": "No pii here",
         "context": {"scenario_id": "demo"},
         "route": "workflow",
-        "plan": {"phases": [{"name": "Phase 1", "owner": "architect"}]},
+        "plan": {"phases": [{"name": "Phase 1", "owners": ["architect"]}]},
         "metadata": {
             "telemetry": {"cost_estimate_usd": 0.01, "latency_s": 1.2},
             "code_review": {"status": "approved"},

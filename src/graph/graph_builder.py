@@ -24,6 +24,7 @@ from .nodes import (
     LangChainAgentNode,
     MemoryRetrieveNode,
     MemoryWriteNode,
+    PlanValidatorNode,
     PlanReviewerNode,
     PlanSummaryNode,
     RAGNode,
@@ -75,12 +76,13 @@ def build_agent_graph(
     memory_write = MemoryWriteNode(memory_store)
     summarizer = ConversationSummaryNode()
     evaluator = EvaluatorNode()
-    langchain_agent = LangChainAgentNode()
+    langchain_agent = LangChainAgentNode(workflow_config)
     workflow_selector = WorkflowSelectorNode(workflow_config)
     architect = ArchitecturePlannerNode(workflow_config)
     plan_reviewer = PlanReviewerNode(workflow_config)
+    plan_validator = PlanValidatorNode()
     tech_lead = TechLeadNode(workflow_config)
-    implementation_planner = ImplementationPlannerNode(template_path=implementation_doc)
+    implementation_planner = ImplementationPlannerNode(workflow_config, template_path=implementation_doc)
     plan_summary = PlanSummaryNode()
     code_reviewer = CodeReviewNode()
 
@@ -109,6 +111,7 @@ def build_agent_graph(
     graph.add_node("workflow_selector", wrap("workflow_selector", workflow_selector.run))
     graph.add_node("architecture_planner", wrap("architecture_planner", architect.run))
     graph.add_node("plan_reviewer", wrap("plan_reviewer", plan_reviewer_with_retry.run))
+    graph.add_node("plan_validator", wrap("plan_validator", plan_validator.run))
     graph.add_node("tech_lead", wrap("tech_lead", tech_lead.run))
     graph.add_node("implementation_planner", wrap("implementation_planner", implementation_with_retry.run))
     graph.add_node("plan_summary", wrap("plan_summary", plan_summary.run))
@@ -142,7 +145,15 @@ def build_agent_graph(
     graph.add_edge("architecture_planner", "plan_reviewer")
     graph.add_edge("plan_reviewer", "tech_lead")
     graph.add_edge("tech_lead", "implementation_planner")
-    graph.add_edge("implementation_planner", "plan_summary")
+    graph.add_edge("implementation_planner", "plan_validator")
+    graph.add_conditional_edges(
+        "plan_validator",
+        plan_validator.branch,
+        {
+            "needs_review": "plan_reviewer",
+            "ok": "plan_summary",
+        },
+    )
     graph.add_edge("plan_summary", "langchain_agent")
     graph.add_edge("langchain_agent", "code_review")
     graph.add_edge("code_review", "evaluator")

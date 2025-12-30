@@ -19,9 +19,9 @@ def test_langchain_agent_handles_phases(monkeypatch):
             "phases": [
                 {
                     "name": "Design Hardening",
-                    "owner": "architect",
+                    "owners": ["architect"],
                     "deliverables": ["Document architecture"],
-                    "acceptance": ["Scenario validation: demo/feature_request.yaml"],
+                    "acceptance_tests": ["Scenario validation: demo/feature_request.yaml"],
                 }
             ]
         },
@@ -31,6 +31,44 @@ def test_langchain_agent_handles_phases(monkeypatch):
     result = node.run(state)
     assert "Design Hardening" in result["output"]
     assert result["workflow_phase"] == "execution"
+
+
+def test_langchain_agent_session_init_calls_share_session(monkeypatch):
+    calls = []
+
+    def _capture_request(instruction, **kwargs):
+        calls.append({"instruction": instruction, "kwargs": kwargs})
+        return "codex_ok"
+
+    monkeypatch.setattr(agent_mod, "request_codex", _capture_request)
+    monkeypatch.setattr(agent_mod, "run_sandboxed", lambda *_: "sandbox")
+    config = {"roles": {"architect": {"prompt": "Act as an architect."}}}
+    node = agent_mod.LangChainAgentNode(workflow_config=config)
+    state = {
+        "plan": {
+            "request": "Ship feature",
+            "phases": [
+                {
+                    "name": "Design Hardening",
+                    "owners": ["architect"],
+                    "deliverables": ["Document architecture"],
+                    "acceptance_tests": ["Scenario validation: demo/feature_request.yaml"],
+                }
+            ],
+        },
+        "messages": [{"role": "user", "content": "start"}],
+        "metadata": {},
+    }
+    node.run(state)
+    assert len(calls) == 2
+    assert calls[0]["instruction"].startswith("Session init.")
+    assert "Feature request: Ship feature" in calls[1]["instruction"]
+    session_ids = {call["kwargs"].get("session_id") for call in calls}
+    session_names = {call["kwargs"].get("session_name") for call in calls}
+    phases = {call["kwargs"].get("phase") for call in calls}
+    assert session_ids and None not in session_ids and len(session_ids) == 1
+    assert session_names and None not in session_names and len(session_names) == 1
+    assert phases == {"Design Hardening"}
 
 
 def test_langchain_agent_with_repo_context(monkeypatch):
@@ -43,7 +81,12 @@ def test_langchain_agent_with_repo_context(monkeypatch):
     state = {
         "plan": {
             "phases": [
-                {"name": "Phase Alpha", "deliverables": ["Do X"], "acceptance": ["Test Y"]},
+                {
+                    "name": "Phase Alpha",
+                    "owners": ["architect"],
+                    "deliverables": ["Do X"],
+                    "acceptance_tests": ["Test Y"],
+                },
             ]
         },
         "messages": [{"role": "user", "content": "build"}],
@@ -69,7 +112,12 @@ def test_langchain_agent_plan_only_skips_execution(monkeypatch):
     state = {
         "plan": {
             "phases": [
-                {"name": "Phase Alpha", "deliverables": ["Do X"], "acceptance": ["Test Y"]},
+                {
+                    "name": "Phase Alpha",
+                    "owners": ["architect"],
+                    "deliverables": ["Do X"],
+                    "acceptance_tests": ["Test Y"],
+                },
             ],
             "summary": "Planning complete",
         },

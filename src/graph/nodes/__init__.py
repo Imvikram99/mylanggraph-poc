@@ -15,6 +15,7 @@ from .langchain_agent import LangChainAgentNode  # noqa: F401
 from .workflow import (  # noqa: F401
     ArchitecturePlannerNode,
     ImplementationPlannerNode,
+    PlanValidatorNode,
     PlanReviewerNode,
     TechLeadNode,
     WorkflowSelectorNode,

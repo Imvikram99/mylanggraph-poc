@@ -9,9 +9,9 @@ def test_swarm_emits_phase_summary():
             "phases": [
                 {
                     "name": "Design Hardening",
-                    "owner": "architect",
+                    "owners": ["architect"],
                     "deliverables": ["Document architecture"],
-                    "acceptance": ["demo/feature_request.yaml"],
+                    "acceptance_tests": ["demo/feature_request.yaml"],
                 }
             ]
         },

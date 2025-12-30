@@ -26,10 +26,15 @@ class SwarmNode:
             summary_lines = []
             for idx, phase in enumerate(phases, start=1):
                 title = phase.get("name", f"Phase {idx}")
-                owner = phase.get("owner", self.planner)
+                owners = phase.get("owners") or []
+                if not owners and phase.get("owner"):
+                    owners = [phase.get("owner")]
+                if not owners:
+                    owners = [self.planner]
+                owner_label = ", ".join(str(owner) for owner in owners if str(owner).strip()) or self.planner
                 deliverables = phase.get("deliverables") or []
-                acceptance = phase.get("acceptance") or []
-                summary_lines.append(f"### Phase {idx} – {title} (owner: {owner})")
+                acceptance = phase.get("acceptance_tests") or phase.get("acceptance") or []
+                summary_lines.append(f"### Phase {idx} – {title} (owner: {owner_label})")
                 summary_lines.extend(f"- Deliverable: {item}" for item in deliverables)
                 summary_lines.extend(f"- Acceptance: {item}" for item in acceptance)
                 summary_lines.append("")

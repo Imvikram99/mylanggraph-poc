@@ -27,6 +27,17 @@ class AgentState(TypedDict, total=False):
     telemetry: Dict[str, Any]
 
 
+class PhasePlan(TypedDict, total=False):
+    """Machine-readable phase metadata for planning/execution."""
+
+    name: str
+    owners: List[str]
+    deliverables: List[str]
+    acceptance_tests: List[str]
+    owner: str
+    acceptance: List[str]
+
+
 class FeaturePlan(TypedDict, total=False):
     """Structured plan data tracked through workflow phases."""
 
@@ -36,7 +47,7 @@ class FeaturePlan(TypedDict, total=False):
     implementation: Dict[str, Any]
     metadata: Dict[str, Any]
     review_feedback: List[str]
-    phases: List[Dict[str, Any]]
+    phases: List[PhasePlan]
 
 
 class FeatureState(AgentState, total=False):
