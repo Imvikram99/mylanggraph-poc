@@ -1,134 +1,153 @@
-# Capability Gap Plan (QYLIS Senior Data Scientist Role)
+# LangGraph Agentic Roadmap
 
-This roadmap focuses on the features/tools that align our LangGraph POC with the expectations outlined in the QYLIS Senior Data Scientist job description (model strategy, RLHF/DPO, evaluation governance, and cross-functional tooling).
+We’ll evolve the POC in clear phases so a single engineer (or Codex automation) can pick up work, know the exit criteria, and keep telemetry/governance intact. Each phase lists goals, deliverables, exit tests, and upstream dependencies.
 
-## 1. Model Strategy & Selection
-- _Status: Model registry + benchmarking shipped; strategy catalog documented in `docs/strategies.md`._
-- **Model registry + benchmarking harness**
-  - Build `scripts/models/benchmark.py` to evaluate OSS/proprietary LLMs/SLMs across latency, cost, accuracy, and privacy flags.
-  - Store benchmark metadata (model name, provider, prompt templates) in `data/metrics/model_benchmarks.jsonl` for reproducible comparisons.
-- **Dynamic provider selection**
-  - Extend `configs/models.yaml` + router to load policy rules (e.g., `MODEL_POLICY=cost_sensitive`) that automatically choose between prompting, RAG, or fine-tuning backends based on scenario metadata.
-- **Prompt/RAG strategy catalog**
-  - Author `docs/strategies.md` describing when to use prompting vs. RAG vs. fine-tuning, referencing business use cases.
+---
 
-## 2. Data Preparation & Training Readiness
-- **Dataset pipeline**
-  - Implement `scripts/data/build_corpus.py` that ingests raw documents, handles cleaning/normalization/deduplication, and emits chunked parquet files along with lineage metadata.
-- **Dataset catalog + versioning**
-  - Introduce `data/datasets/manifest.json` capturing dataset IDs, schema, quality metrics, and storage paths (mirroring MLflow/W&B dataset tracking).
-- **Quality dashboards**
-  - Add `scripts/data/quality_report.py` to compute coverage, class balance, and dedup stats; surface results in `data/metrics/data_quality.json`.
+## Expert Review & Guardrails
+- **Verdict**: The Architect → Reviewer → Lead design leans into LangGraph’s strengths (stateful cycles + HITL). Keep separation between planning and evaluation so no node grades its own work.
+- **State schema first**: Introduce a `FeatureState` `TypedDict` now with `messages`, `plan` (structured dict), `checkpoints`, and counters (e.g., `review_attempts`). This avoids string-diff churn when Reviewer edits individual plan sections.
+- **Approval pauses**: Use LangGraph `interrupt_before`/`interrupt_after` hooks so Architect/Tech Lead outputs can pause for human approval (or CLI confirmation) before proceeding.
+- **Router-worker vs. swarm**: Treat Swarm execution as an orchestrated map stage—emit a task list, then dispatch specialized workers rather than free-form agent chatter to prevent runaway costs.
+- **State summarization**: Before coding begins, summarize the approved plan into a fresh system message and truncate brainstorming context so coding agents operate with a concise brief.
+- **Circuit breaker**: Track attempt counts per loop and fail fast (surface a `needs_human` error) after N retries to avoid infinite Architect↔Reviewer cycles.
 
-## 3. RLHF / DPO & Human-in-the-Loop
-- **Preference collection service**
-  - Build a lightweight annotation UI (FastAPI + SQLite) under `src/ui/annotations.py` to capture pairwise preferences, annotator IDs, and bias metrics.
-- **Reward modeling pipeline**
-  - Provide `scripts/rlhf/train_reward.py` (PyTorch/HF) that consumes preferences and trains reward models; log experiments via MLflow/W&B.
-- **RLHF/DPO orchestration**
-  - Add `scripts/rlhf/run_pipeline.py` to run prompt generation, preference sampling, reward training, and policy optimization (supporting both PPO-style RLHF and offline DPO).
-- **Bias / agreement metrics**
-  - Extend evaluator metrics to log inter-annotator agreement and bias scores per dataset.
+## Phase 0 – Baseline Readiness
+- **Goals**: Run the repo locally, load env vars, ingest minimum docs. Capture current behavior as a control trajectory.
+- **Deliverables**:
+  - `.env` populated with routing + provider keys.
+  - `python scripts/ingest.py --docs data/knowledge_base` refreshed embeddings.
+  - `python -m src.runner --scenario demo/rag_qa.yaml --stream` logs saved to `data/trajectories/`.
+- **Exit checks**:
+  - ✅ `data/memory/vectorstore/` contains fresh files.
+  - ✅ `data/metrics/io_audit.jsonl` confirms valid input/output for the smoke scenario.
 
-## 4. Evaluation & Governance
-- _Status: Eval suite + governance + KPI reporter (`src/eval/kpi.py`, `data/metrics/kpi_report.jsonl`)._
-- **Comprehensive eval suite**
-  - Create `scripts/eval/run_suite.py` covering relevance, hallucination, bias, robustness, and safety; integrate adversarial tests and cost/latency dashboards.
-- **Responsible AI controls**
-  - Add policy checks (PII detection, toxicity filters) and governance logs stored in `data/metrics/governance.jsonl`.
-- **Business impact tracking**
-  - Integrate evaluation results with product KPIs (e.g., success rates, conversion metrics) to show measurable impact.
+### Phase 0 Implementation Plan
+| Step | Owner | Actions | Success Criteria |
+| --- | --- | --- | --- |
+| 0.1 Environment bootstrap | Ops | Create/activate `.venv`, install deps via `pip install -r requirements.txt`, copy `.env.example` to `.env` | `which python` points to local venv; `.env` populated with required keys |
+| 0.2 Provider + telemetry wiring | Ops | Fill `.env` with `OPENROUTER_API_KEY`, `MODEL_PROVIDER`, `QDRANT_URL`; run `python -m src.runner --help` to confirm config loads; ensure `LANGCHAIN_TRACING_V2` disabled unless LangSmith configured | CLI starts without missing env errors |
+| 0.3 Vector store ingestion | Researcher | Run `python scripts/ingest.py --docs data/knowledge_base`; verify logs mention document count; snapshot `${VECTOR_DB_PATH}` timestamp | `ls -lh data/memory/vectorstore` shows updated files (+ telemetry in console) |
+| 0.4 Baseline run | Researcher | Execute `python -m src.runner --scenario demo/rag_qa.yaml --stream --graph-config configs/graph_config.dev.yaml`; capture console output + `data/trajectories/run_*.json` | Trajectory + IO audit written; router route recorded |
+| 0.5 Verification + checklist | Ops | Confirm `data/metrics/io_audit.jsonl` contains latest scenario_id with `valid_input=true`, `valid_output=true`; document run metadata in this file (phase checklist) | Exit criteria satisfied; share run hash in stand-up |
 
-## 5. Technical Leadership & Enablement
-- _Status: Playbooks published, PR template (`.github/pull_request_template.md`) enforces mentorship checklist, CI expanded._
-- **Cross-functional documentation**
-  - Maintain `docs/playbooks/` for data engineering handoffs (schemas, pipelines) and product alignment (evaluation rubrics, release checklists).
-- **Mentorship tooling**
-  - Set up code review templates (GitHub PR templates) and experiment tracking guidelines to streamline collaboration.
-- **CI/CD enhancements**
-  - Expand `.github/workflows/ci.yml` to include dataset linting, RLHF pipeline dry runs, and security/governance checks before deployment.
+**Notes**
+- If ingestion fails due to Qdrant connectivity, temporarily set `VECTOR_DB_IMPL=chroma` in `.env` to unblock Phase 0 while infrastructure is provisioned.
+- Capture screenshots or logs for each step; they become evidence for Phase 1 onboarding.
 
-## Immediate Action Items
-1. Stand up the model benchmarking harness and dataset build pipeline (Sections 1–2).
-2. Prototype the annotation UI + reward modeling script to demonstrate RLHF readiness (Section 3).
-3. Expand the evaluator scripts to cover governance criteria and connect to product KPIs (Section 4).
-4. Update CI + documentation to reflect cross-functional workflows (Section 5).
+## Phase 1 – Repository & Knowledge Discovery
+- **Goals**: Teach the system about existing capabilities so future prompts stay grounded.
+- **Tasks**:
+  1. Expand `data/knowledge_base/` with architecture docs, run `scripts/ingest.py`.
+  2. Use `SkillHubNode` + MCP filesystem tool to ensure all key docs (README, configs, docs/strategies.md) are retrievable.
+  3. Tag memories using `TemporalMemoryStore` categories (`architecture`, `workflow`, `evaluation`).
+- **Deliverables**:
+  - Curated Markdown notes linking each module to responsibilities.
+  - Memory search smoke tests (`python scripts/run_scenarios.py --scenarios demo`) verifying hits for “architecture”, “swarm”, etc.
 
-## 6. Advanced Agent Orchestration, Evaluation, and Prompt/PEFT Readiness
-1. **Agent orchestration (LangChain + cyclic graphs)**
-   - Embed a LangChain `AgentExecutor` node within our LangGraph DAG to prove seamless interoperability.
-   - Demonstrate cyclic/planning loops (e.g., `planner -> executor -> evaluator -> planner`) with guardrails to prevent infinite cycles.
-   - Add a complex scenario (e.g., `demo/autonomous_analyst.yaml`) plus documentation explaining the autonomous workflow.
+### Phase 1 Implementation Plan
+| Step | Owner | Actions | Success Criteria |
+| --- | --- | --- | --- |
+| 1.1 Knowledge inventory | Researcher | Identify missing architecture/workflow docs (README, configs, `docs/strategies.md`, runbooks); record source + freshness notes in `docs/plan.md` checklist | Inventory lists every core module with doc path + last updated date |
+| 1.2 Knowledge base curation | Researcher | Normalize selected docs (trim secrets, ensure Markdown), copy into `data/knowledge_base/` under descriptive folders | `git status` shows new/updated Markdown under `data/knowledge_base/` and no sensitive data flagged |
+| 1.3 Embedding refresh | Ops | Run `python scripts/ingest.py --docs data/knowledge_base` after updating `.env` vector settings; capture doc + chunk counts in logs | `data/memory/vectorstore/` timestamp updated and ingest logs saved to `data/trajectories/phase1_ingest.log` |
+| 1.4 SkillHub & MCP verification | Researcher | Configure `SkillHubNode` to surface repo docs, test retrieval via MCP filesystem (e.g., request `README.md`, `configs/graph_config.dev.yaml`) | MCP transcript shows successful fetches for every required doc; SkillHub returns non-empty snippets |
+| 1.5 Temporal tagging & smoke tests | Researcher | Tag new memories with `architecture/workflow/evaluation` using `TemporalMemoryStore` helper; run `python scripts/run_scenarios.py --scenarios demo` to confirm retrieval keywords (“architecture”, “swarm”, “checkpoints”) hit | Scenario run stores trajectory referencing tagged memories; CLI output confirms relevant hits |
 
-2. **LLM-as-a-Judge evaluation**
-   - Implement a judge module (`src/eval/judge.py`) that calls a stronger model (GPT-4, Claude) to assess outputs for accuracy, safety, and policy adherence using structured prompts.
-   - Integrate judge scores into the evaluation pipeline (`scripts/eval/run_suite.py`) and log results alongside heuristic metrics.
-   - Provide example prompts + tests that exercise “LLM as judge” patterns.
+#### Step 1.1 – Knowledge Inventory
+| Module / Focus | Source Doc(s) | Last Updated | Notes |
+| --- | --- | --- | --- |
+| Architecture overview | `README.md`, `docs/flow-diagram.md` | 2025-12-19 / 2025-12-15 | Covers macro flow + mermaid diagram but lacks per-node responsibilities; needs cross-link to LangGraph state schema. |
+| Routing + configuration | `configs/graph_config.dev.yaml`, `src/graph/nodes/router.py` | 2025-12-19 | Router heuristics + forced routes defined, yet “workflow” trigger phrases not documented; add config commentary to KB. |
+| Retrieval & knowledge strategy | `docs/strategies.md`, `data/knowledge_base/memory_strategy.md` | 2025-12-19 / 2025-12-19 | Strategy doc summarizes delivery options but is missing concrete owner matrix; curated KB needs RAG + GraphRAG comparison. |
+| Evaluation & RAFT | `docs/raft.md`, `src/graph/nodes/evaluator.py` | 2025-12-15 / 2025-12-19 | Describes heuristics but not the planned Reviewer loop; annotate evaluation criteria + metrics sinks. |
+| Scenarios & demos | `docs/scenarios.md`, `demo/*.yaml` | 2025-12-19 / 2025-12-15 | Scenario DSL documented, yet we lack tags for architecture/workflow prompts; ingestion must capture sample prompts + expected routes. |
+## Phase 2 – Workflow Scaffolding (Architect → Reviewer → Tech Lead)
+- **Goals**: Add the new feature-request workflow that routes “I need this feature…” through architecture planning, strict review, and tech-lead planning.
+- **Tasks**:
+  1. Create `configs/workflows.yaml` with prompt templates for architects, reviewers, and tech leads.
+  2. Define `FeatureState` (extends `AgentState`) with `messages`, `plan`, `checkpoints`, `attempt_counters`, and `workflow_phase` metadata; plumb it through `graph_builder`.
+  3. Add nodes under `src/graph/nodes/workflow.py` (`WorkflowSelectorNode`, `ArchitecturePlannerNode`, `PlanReviewerNode`, `TechLeadNode`) and register them in `graph_builder`, making reviewer nodes capable of mutating only the relevant plan slice.
+  4. Update `RouterNode` thresholds so `context.mode=architect` or trigger phrases force the workflow path; hook `interrupt_before=["plan_reviewer", "tech_lead"]` so CLI users/HITL can approve.
+  5. Extend `skills/registry.yaml` with `lead_pack` & `implementation_pack` to expose reusable prompt helpers.
+- **Deliverables**:
+  - New scenario (`demo/feature_request.yaml`) proving the branch.
+  - Telemetry showing router reason `workflow`.
+- **Exit checks**:
+  - ✅ Workflow nodes wrapped by `CostLatencyTracker`.
+  - ✅ Plan reviewer can send corrections (use `RetryNode` contract).
 
-3. **Prompt tuning / PEFT readiness**
-   - Add prompt-optimization tools (e.g., template search via scripts or notebooks) and document workflows under `docs/prompt_tuning.md`.
-   - Create a PEFT/LoRA scaffolding script (e.g., `scripts/models/train_peft.py`) that demonstrates how to attach adapters to chosen base models, with configuration knobs for parameter-efficient fine-tuning.
-   - Capture best practices (hyperparameters, evaluation hooks) so the repo shows applied knowledge of prompt tuning and PEFT.
+## Phase 3 – Implementation Planner & Phase Gates
+- **Goals**: Turn reviewer-approved plans into phase-wise execution steps and align with swarm/coding loops.
+- **Tasks**:
+  1. Create `docs/implementation.md` with templates for Phase plan, dependencies, owners, and review checklist.
+  2. Build `ImplementationPlannerNode` that reads the doc via MCP filesystem and emits Markdown sections (`Phase 1`, `Phase 2`, ...) while writing each phase to `FeatureState["plan"]["phases"]`.
+  3. Replace the open-ended Swarm loop with a router-worker fan-out: Implementation planner emits a task list, `Send()` dispatches workers per task, and `SwarmNode` simply reconciles outputs.
+  4. Add CLI helper (`scripts/workflow/new_feature.py`) to set scenario context (mode, stack, deadlines) and optionally enforce a `recursion_limit`.
+- **Deliverables**:
+  - Phase-wise plan stored in trajectory metadata.
+  - `data/trajectories/` includes `phases` artifact with owners + acceptance tests.
+- **Exit checks**:
+  - ✅ When Implementation planner fails validation, reviewer feedback loops until corrected.
+  - ✅ Swarm outputs cite phase titles in `state["output"]`.
 
-4. **Data integrity validation**
-   - Define Pydantic schemas for scenario inputs/outputs (`src/schemas/`), enforce validation before/after each graph run, and log schema violations.
-   - Add an I/O audit log (`data/metrics/io_audit.jsonl`) documenting whether each request/response satisfied the schema and project requirements.
-   - Include CI checks that fail if schema validation or audit logging is missing for new code paths.
+## Phase 4 – Coding, Review, and Automation
+- **Goals**: Drive real edits and reviews based on the phase plan, enabling Codex/agents to implement features end-to-end.
+- **Tasks**:
+  1. Insert a `PlanSummaryNode` that condenses Architect/Reviewer chatter into a concise system brief before coding; clear stale brainstorm messages but keep the structured plan in state.
+  2. Teach `LangChainAgentNode` to read phases and execute coding subtasks or call skill packs (`report_pack` for docs, `lead_pack` for stack choices).
+  3. Wrap all code execution and file writes in a sandbox (Docker/E2B) so `CodeExecutionTool` cannot mutate the host; expose sandbox controls via `skills/ops_pack`.
+  4. Implement `CodeReviewNode` that enforces `docs/playbooks/product_alignment.md` and `docs/playbooks/data_engineering.md` guardrails.
+  5. Capture diffs/tests per phase (persist to `data/trajectories` and optionally `data/metrics/cost_latency.jsonl`), linking them back to `FeatureState["checkpoints"]`.
+- **Deliverables**:
+  - Automated checklist for each phase: plan approved → implementation done → code reviewed.
+  - CLI command `python -m src.runner --scenario demo/feature_request.yaml` produces final response referencing code paths touched.
+- **Exit checks**:
+  - ✅ CodeReviewNode emits actionable feedback when acceptance tests missing.
+  - ✅ IO audit shows new route + metadata (`workflow_phase`).
 
-## Immediate Next Steps
-- [ ] Stand up the model benchmarking harness and dataset build pipeline (Sections 1–2).
-- [ ] Prototype the annotation UI + reward modeling script to demonstrate RLHF readiness (Section 3).
-- [ ] Expand the evaluator scripts to cover governance criteria and connect to product KPIs (Section 4).
-- [ ] Update CI + documentation to reflect cross-functional workflows (Section 5).
-- [ ] Implement advanced agent orchestration, LLM-as-a-judge evaluation, prompt/PEFT scaffolding, and data-integrity validation per Section 6.
+## Phase 5 – Observability & Governance Expansion
+- **Goals**: Ensure every feature run captures budget, evaluation, and governance posture.
+- **Tasks**:
+  1. Extend `CostLatencyTracker` metrics to include workflow phase IDs.
+  2. Update `EvaluatorNode` prompt to reason about plan coverage + risk.
+  3. Wire governance outputs to `data/metrics/governance.jsonl` (reuse `scripts/eval/adversarial_scan.py` to sanity-check).
+- **Deliverables**:
+  - Dashboard-ready JSONL logs storing `phase`, `route`, `cost_usd`, `latency_s`, `review_status`.
+  - Documented verification instructions in this file.
+- **Exit checks**:
+  - ✅ Regression tests fail if workflow path skips evaluator or audit logging.
 
-## 7. Continuous Learning & Stretch Phases
-These phases push the POC beyond the job-description baseline and act as structured learning sprints.
+## Phase 6 – Stretch: RLHF, Prompt/PEFT, Deployment
+- **Goals**: Turn the workflow into a showcase of advanced capabilities.
+- **Tasks**:
+  - Integrate RLHF artifacts (`scripts/rlhf/train_reward.py`) into plan evaluation loop.
+  - Reuse `docs/prompt_tuning.md` to optimize architecture prompts; optionally kick off PEFT scaffolding.
+  - Harden deployment via `configs/tenants.yaml` + FastAPI server so workflow can run multi-tenant.
+- **Deliverables**:
+  - Benchmarks comparing pre/post tuning.
+  - CI entry ensuring workflow scenario runs nightly.
 
-### Phase 7A – Synthetic Data & Robustness
-- _Status: Implemented via `src/data_pipeline/augment.py`, `scripts/data/augment.py`, and robustness scoring in `scripts/eval/run_suite.py`._
-- Build `scripts/data/augment.py` to generate counterfactual/paraphrased samples (LLM + rule-based perturbations).
-- Track lineage (`data/datasets/manifest.json`) so augmented samples are clearly labeled.
-- Add robustness tests inside `scripts/eval/run_suite.py` to score outputs on noisy/perturbed inputs.
+---
 
-### Phase 7B – Cost & Latency Budgeting
-- _Status: Implemented via `CostLatencyTracker`, router telemetry awareness, and `data/metrics/cost_latency.jsonl`._
-- Instrument LangGraph callbacks to capture per-node latency, token counts, and estimated cost.
-- Emit metrics to `data/metrics/model_benchmarks.jsonl` or a new `data/metrics/cost_latency.jsonl`.
-- Teach the router to honor budgets (e.g., drop expensive routes when exceeding thresholds).
+## Milestones & Tracking
+| Phase | Target Duration | Primary Owner | Blocking Dependencies | Validation Command |
+| --- | --- | --- | --- | --- |
+| 0 | 0.5d | Ops | None | `python -m src.runner --scenario demo/rag_qa.yaml --stream` |
+| 1 | 1d | Researcher | Phase 0 | `python scripts/run_scenarios.py --scenarios demo` |
+| 2 | 2d | Architect | Phase 1 | `python -m src.runner --scenario demo/feature_request.yaml --graph-config configs/graph_config.dev.yaml` |
+| 3 | 2d | Tech Lead | Phase 2 | `python -m src.runner --scenario demo/feature_request.yaml --stream` |
+| 4 | 2d | SWE | Phase 3 | `pytest` + CLI scenario |
+| 5 | 1d | Observability | Phase 4 | `python scripts/eval/adversarial_scan.py data/trajectories --report data/metrics/adversarial_report.json` |
+| 6 | ongoing | Principal | Phase 5 | Project-specific |
 
-### Phase 7C – Safety & Adversarial Red Teaming
-- _Status: Implemented via `scripts/eval/adversarial_catalog.py`, `src/eval/adversarial.py`, and governance logging._ 
-- Extend the eval suite with jailbreak, toxicity, and PII prompts sourced from `scripts/eval/adversarial_catalog.py`.
-- Add policy filters (OpenAI moderation / custom heuristics) and log violations to `data/metrics/governance.jsonl`.
-- Automate nightly adversarial sweeps via CI to catch regressions.
+---
 
-### Phase 7D – Regression & Trajectory Snapshots
-- _Status: Implemented via `scripts/eval/regression.py` snapshot + compare commands._
-- Snapshot representative LangGraph runs (JSON trajectories) and add comparison tests that diff future runs.
-- Optional: leverage an “LLM-as-a-judge regression” that compares new outputs with blessed references.
-- Wire checks into CI so unexpected deltas block merges.
-
-### Phase 7E – MLOps & Experiment Tracking
-- _Status: Implemented via `ExperimentTracker` logging from reward training + RLHF pipeline._
-- Push reward-model checkpoints, dataset hashes, and evaluation metrics to MLflow or W&B.
-- Provide templates/notebooks showing how to reproduce experiments and visualize KPI lift.
-
-### Phase 7F – Continuous Annotation Feedback
-- _Status: Implemented via annotation queue endpoints, dashboards, and active-learning surfacing._
-- Upgrade the annotation UI with reviewer queues, inter-annotator dashboards, and bias/coverage charts.
-- Implement active-learning sampling (surface low-confidence generations for human review).
-
-### Phase 7G – Deployment Hardening
-- _Status: Implemented via tenant-aware FastAPI server, feature flags, and rate limiting._
-- Package the graph runner as a FastAPI/Modal service with health checks, rate limiting, and per-tenant secrets.
-- Add feature flags / rollout config so risky changes can be toggled without redeploys.
-
-### Phase 7H – Observation-Driven Prompt/Model Tuning
-- _Status: Implemented via `scripts/data/audit_report.py` and audit-driven summaries._
-- Parse `data/metrics/io_audit.jsonl` + evaluation logs to produce error notebooks that guide improvements.
-- Schedule a recurring “audit review” task where failed cases feed back into prompt tuning, data augmentation, or model selection experiments.
-
-Each Phase 7 sprint can be executed independently—pick the stretch area that best supports the next career milestone and iterate just like Phases 1–6.
-
-This plan ensures our repo showcases the skills highlighted in the job post: model selection, data quality, RLHF/HITL systems, evaluation/governance, advanced agent orchestration, LLM-as-a-judge patterns, prompt/PEFT tuning, and technical leadership.
+## Working Agreements
+- Always land a trajectory + IO audit per phase so Codex can replay context.
+- Keep skill packs up to date; if a phase needs bespoke tooling, add it via `skills/registry.yaml` instead of hardcoding.
+- Update this `docs/plan.md` whenever a phase completes (checklist style) so future contributors know the current baseline.
+- Enforce circuit breakers: track `review_attempts` and fail gracefully (surface `needs_human`) if Architect↔Reviewer or Coding↔Review loops exceed agreed limits.
+- Whenever phases transition from planning to execution, run the summarization step so downstream agents operate with a clean state snapshot.
+- Write graph-edge unit tests with mocked state (e.g., Reviewer rejection) before connecting live LLM calls.
+- Ensure runs use a checkpointing backend (SQLite/Postgres) so failed phases can resume (“time travel” debugging).

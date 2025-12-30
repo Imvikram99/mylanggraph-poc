@@ -97,6 +97,7 @@ def execute_scenario(
     stream: bool = False,
     graph_config: Path | None = None,
 ):
+    load_dotenv()
     scenario_input = payload if isinstance(payload, ScenarioInput) else _validate_input(payload, scenario_name)
     return _execute_validated_scenario(scenario_input, scenario_name, stream=stream, graph_config=graph_config)
 
@@ -107,6 +108,7 @@ def stream_scenario(
     *,
     graph_config: Path | None = None,
 ):
+    load_dotenv()
     scenario_input = payload if isinstance(payload, ScenarioInput) else _validate_input(payload, scenario_name)
     graph, state, metadata, tracker = _prepare_run(scenario_input, scenario_name, graph_config)
     final_state = state
@@ -177,8 +179,9 @@ def _stream_run(graph, state: Dict[str, Any], metadata: Dict[str, Any]):
             label, payload = _normalize_event(event)
             logger.log(label, payload)
             console.log(f"[blue]stream[/] {label}: {payload}")
-            if isinstance(payload, dict) and "messages" in payload:
-                final_state = payload
+            candidate = _extract_state_from_event(payload)
+            if candidate is not None:
+                final_state = candidate
         return final_state
     except Exception:  # pragma: no cover - fallback when stream unsupported
         console.log("[yellow]Graph streaming unavailable; falling back to invoke().[/]")
@@ -189,6 +192,18 @@ def _normalize_event(event):
     if isinstance(event, tuple) and len(event) == 2:
         return event
     return "event", event
+
+
+def _extract_state_from_event(payload: Any) -> Dict[str, Any] | None:
+    """Handle graph.stream payloads that wrap state dictionaries under node names."""
+    if isinstance(payload, dict):
+        if "messages" in payload:
+            return payload
+        if len(payload) == 1:
+            inner = next(iter(payload.values()))
+            if isinstance(inner, dict) and "messages" in inner:
+                return inner
+    return None
 
 
 def _save_trajectory(state: Dict[str, Any]) -> None:

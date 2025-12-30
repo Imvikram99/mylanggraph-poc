@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from rich.console import Console
 
 from ..state import RouteDecision
-from ..models import ModelPolicy
+from ...models.policy import ModelPolicy
 
 console = Console()
 

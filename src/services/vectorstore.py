@@ -9,11 +9,6 @@ from typing import Any, Dict, List, Optional
 from rich.console import Console
 
 try:  # pragma: no cover - optional dependency
-    from langchain_openai import OpenAIEmbeddings
-except Exception:  # pragma: no cover
-    OpenAIEmbeddings = None  # type: ignore
-
-try:  # pragma: no cover - optional dependency
     from langchain_community.vectorstores import Chroma
 except Exception:  # pragma: no cover
     Chroma = None  # type: ignore
@@ -24,6 +19,8 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover
     QdrantClient = None  # type: ignore[assignment]
     rest = None  # type: ignore
+
+from .embeddings import build_embeddings
 
 console = Console()
 
@@ -78,27 +75,10 @@ class VectorStoreRetriever:
 
     # ---------------- private helpers ----------------
     def _build_embeddings(self):
-        if OpenAIEmbeddings is None:
-            console.log("[yellow]langchain_openai not available; retrieval will use keyword fallback.[/]")
-            return None
-        provider = os.getenv("EMBEDDING_PROVIDER", "openrouter").lower()
-        model = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-large")
-        if provider == "openrouter":
-            api_key = os.getenv("OPENROUTER_API_KEY")
-            api_base = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
-        else:
-            api_key = os.getenv("OPENAI_API_KEY")
-            api_base = os.getenv("OPENAI_API_BASE")
-        if not api_key:
-            console.log("[yellow]No embedding API key configured; retrieval will use keyword fallback.[/]")
-            return None
-        kwargs: Dict[str, Any] = {"model": model, "openai_api_key": api_key}
-        if api_base:
-            kwargs["openai_api_base"] = api_base
         try:
-            return OpenAIEmbeddings(**kwargs)
-        except Exception as exc:  # pragma: no cover - invalid credentials
-            console.log(f"[yellow]Embedding init failed[/] {exc}; using keyword fallback.")
+            return build_embeddings()
+        except Exception as exc:  # pragma: no cover - builder failure
+            console.log(f"[yellow]Embedding builder failed; falling back to keyword search[/] {exc}")
             return None
 
     def _build_qdrant_client(self) -> Optional[QdrantClient]:
@@ -113,12 +93,7 @@ class VectorStoreRetriever:
     def _search_qdrant(self, query: str, top_k: int) -> List[RetrievedDocument]:
         assert self._client is not None and self._embeddings is not None and rest is not None
         vector = self._embeddings.embed_query(query)
-        result = self._client.search(
-            collection_name=self.collection,
-            query_vector=vector,
-            limit=top_k,
-            with_payload=True,
-        )
+        result = self._query_qdrant_points(vector, top_k)
         docs: List[RetrievedDocument] = []
         for point in result:
             payload = point.payload or {}
@@ -130,6 +105,29 @@ class VectorStoreRetriever:
                 )
             )
         return docs
+
+    def _query_qdrant_points(self, vector, top_k: int):
+        """Call whichever Qdrant search API is available (search/query_points)."""
+        assert self._client is not None
+        search_kwargs = {
+            "collection_name": self.collection,
+            "limit": top_k,
+            "with_payload": True,
+        }
+        if hasattr(self._client, "search"):
+            try:
+                return self._client.search(query_vector=vector, **search_kwargs)
+            except AttributeError:
+                # Older/newer qdrant-client builds may not expose .search
+                pass
+        # qdrant-client>=1.10 exposes query_points, while older releases use search_points
+        if hasattr(self._client, "search_points"):
+            response = self._client.search_points(query=vector, **search_kwargs)
+            return getattr(response, "points", response)
+        if hasattr(self._client, "query_points"):
+            response = self._client.query_points(query=vector, **search_kwargs)
+            return getattr(response, "points", response)
+        raise AttributeError("Qdrant client has no supported search method")
 
     def _search_chroma(self, query: str, top_k: int) -> List[RetrievedDocument]:
         assert Chroma is not None and self._embeddings is not None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 from datetime import datetime, timezone
@@ -12,9 +13,14 @@ import typer
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
+from src.services.embeddings import build_embeddings
 
 app = typer.Typer(help="Ingest documents into the selected vector store.")
 
@@ -42,11 +48,7 @@ def run(
     splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=50)
     splits = splitter.split_documents(documents)
     typer.echo(f"Ingesting {len(splits)} chunks from {docs}")
-    try:
-        embeddings = _build_embeddings()
-    except ValueError as exc:
-        typer.secho(str(exc), fg=typer.colors.RED)
-        raise typer.Exit(1) from exc
+    embeddings = _build_embeddings()
     vector_impl = os.getenv("VECTOR_DB_IMPL", "qdrant").lower()
     if vector_impl == "qdrant":
         _persist_qdrant(splits, embeddings, collection)
@@ -88,25 +90,18 @@ def _persist_chroma(documents, embeddings) -> None:
     from langchain_community.vectorstores import Chroma
 
     persist_dir = os.getenv("VECTOR_DB_PATH", "data/memory/vectorstore")
-    Chroma.from_documents(documents, embeddings, persist_directory=persist_dir)
-    typer.echo(f"Persisted {len(documents)} chunks to Chroma at {persist_dir}.")
+    collection_name = os.getenv("QDRANT_COLLECTION", "langgraph_memories")
+    Chroma.from_documents(
+        documents,
+        embeddings,
+        persist_directory=persist_dir,
+        collection_name=collection_name,
+    )
+    typer.echo(f"Persisted {len(documents)} chunks to Chroma at {persist_dir} (collection={collection_name}).")
 
 
 def _build_embeddings():
-    provider = os.getenv("EMBEDDING_PROVIDER", "openrouter").lower()
-    model = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-large")
-    if provider == "openrouter":
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        api_base = os.getenv("OPENROUTER_BASE", "https://openrouter.ai/api/v1")
-    else:
-        api_key = os.getenv("OPENAI_API_KEY")
-        api_base = os.getenv("OPENAI_API_BASE")
-    if not api_key:
-        raise ValueError("Missing embedding API key (OPENROUTER_API_KEY or OPENAI_API_KEY).")
-    kwargs = {"model": model, "openai_api_key": api_key}
-    if api_base:
-        kwargs["openai_api_base"] = api_base
-    return OpenAIEmbeddings(**kwargs)
+    return build_embeddings()
 
 
 def _ensure_collection(client: QdrantClient, name: str, dim: int) -> None:
