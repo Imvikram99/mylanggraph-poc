@@ -22,17 +22,21 @@ from .nodes import (
     HybridNode,
     ImplementationPlannerNode,
     LangChainAgentNode,
+    LeadPlannerNode,
     MemoryRetrieveNode,
     MemoryWriteNode,
+    PlanningResumeNode,
     PlanValidatorNode,
     PlanReviewerNode,
     PlanSummaryNode,
+    ProductOwnerNode,
     RAGNode,
     RetryNode,
     RouterNode,
     SkillHubNode,
     SwarmNode,
     TechLeadNode,
+    UiUxDesignerNode,
     WorkflowSelectorNode,
 )
 from .state import FeatureState
@@ -45,6 +49,21 @@ def load_config(path: str | Path) -> Dict[str, Any]:
         raise FileNotFoundError(f"Graph config not found: {cfg_path}")
     with cfg_path.open("r", encoding="utf-8") as fin:
         return yaml.safe_load(fin) or {}
+
+
+def _workflow_mode_from_state(state: Dict[str, Any]) -> str:
+    plan = state.get("plan") or {}
+    metadata = plan.get("metadata") or {}
+    context = state.get("context") or {}
+    value = metadata.get("workflow_mode") or context.get("workflow_mode")
+    text = str(value or "").strip().lower()
+    if text in {"full", "all"}:
+        return "full"
+    if text in {"from_planning", "post_planning", "resume"}:
+        return "from_planning"
+    if text in {"planning", "planning_only", "plan_only", "architecture_only"}:
+        return "planning"
+    return "planning"
 
 
 def build_agent_graph(
@@ -78,9 +97,13 @@ def build_agent_graph(
     evaluator = EvaluatorNode()
     langchain_agent = LangChainAgentNode(workflow_config)
     workflow_selector = WorkflowSelectorNode(workflow_config)
+    planning_resume = PlanningResumeNode(workflow_config)
+    product_owner = ProductOwnerNode(workflow_config)
+    ui_ux_designer = UiUxDesignerNode(workflow_config)
     architect = ArchitecturePlannerNode(workflow_config)
     plan_reviewer = PlanReviewerNode(workflow_config)
     plan_validator = PlanValidatorNode()
+    lead_planner = LeadPlannerNode(workflow_config)
     tech_lead = TechLeadNode(workflow_config)
     implementation_planner = ImplementationPlannerNode(workflow_config, template_path=implementation_doc)
     plan_summary = PlanSummaryNode()
@@ -109,9 +132,13 @@ def build_agent_graph(
     graph.add_node("evaluator", wrap("evaluator", evaluator.run))
     graph.add_node("memory_write", wrap("memory_write", memory_write.run))
     graph.add_node("workflow_selector", wrap("workflow_selector", workflow_selector.run))
+    graph.add_node("planning_resume", wrap("planning_resume", planning_resume.run))
+    graph.add_node("product_owner", wrap("product_owner", product_owner.run))
+    graph.add_node("ui_ux_design", wrap("ui_ux_design", ui_ux_designer.run))
     graph.add_node("architecture_planner", wrap("architecture_planner", architect.run))
     graph.add_node("plan_reviewer", wrap("plan_reviewer", plan_reviewer_with_retry.run))
     graph.add_node("plan_validator", wrap("plan_validator", plan_validator.run))
+    graph.add_node("lead_planner", wrap("lead_planner", lead_planner.run))
     graph.add_node("tech_lead", wrap("tech_lead", tech_lead.run))
     graph.add_node("implementation_planner", wrap("implementation_planner", implementation_with_retry.run))
     graph.add_node("plan_summary", wrap("plan_summary", plan_summary.run))
@@ -141,9 +168,33 @@ def build_agent_graph(
     graph.add_edge("handoff", "swarm")
     graph.add_edge("swarm", "evaluator")
     graph.add_edge("hybrid", "evaluator")
-    graph.add_edge("workflow_selector", "architecture_planner")
-    graph.add_edge("architecture_planner", "plan_reviewer")
-    graph.add_edge("plan_reviewer", "tech_lead")
+    graph.add_conditional_edges(
+        "workflow_selector",
+        lambda state: "planning_resume"
+        if _workflow_mode_from_state(state) == "from_planning"
+        else "product_owner",
+        {"planning_resume": "planning_resume", "product_owner": "product_owner"},
+    )
+    graph.add_edge("planning_resume", "plan_reviewer")
+    graph.add_edge("product_owner", "ui_ux_design")
+    graph.add_edge("ui_ux_design", "architecture_planner")
+    graph.add_conditional_edges(
+        "architecture_planner",
+        lambda state: "continue"
+        if _workflow_mode_from_state(state) == "full"
+        else "stop",
+        {"continue": "plan_reviewer", "stop": END},
+    )
+    graph.add_conditional_edges(
+        "plan_reviewer",
+        plan_reviewer.branch,
+        {
+            "phase_revision": "implementation_planner",
+            "architecture_revision": "architecture_planner",
+            "approved": "lead_planner",
+        },
+    )
+    graph.add_edge("lead_planner", "tech_lead")
     graph.add_edge("tech_lead", "implementation_planner")
     graph.add_edge("implementation_planner", "plan_validator")
     graph.add_conditional_edges(

@@ -26,7 +26,7 @@ Each scenario YAML uses the DSL documented in `docs/scenarios.md` → prompts, o
 1. Router writes `metadata.router_decision` to every trajectory so evaluators know which branch executed.
 2. Memory retrieval precedes heavy computation; `TemporalMemoryStore` filters to the last 30 days (dev config) and merges into `state["working_memory"]["long_term"]`.
 3. Swarm planner defaults to `researcher` planner with `researcher` + `writer` workers (max 2); review future phases to add Tech Lead + Reviewer gates.
-4. When `context.mode="architect"` (future Phase 2), router will bypass generic RAG route and invoke workflow nodes noted in `docs/plan.md#Phase-2`.
+4. When `context.mode="architect"` (future Phase 2), router will bypass generic RAG route and invoke workflow nodes noted in `docs/architecture_plan.md` and `docs/implementation.md`.
 
 ## Strategy Selection Cheatsheet
 Adapted from `docs/strategies.md` so playbooks live alongside routing decisions.

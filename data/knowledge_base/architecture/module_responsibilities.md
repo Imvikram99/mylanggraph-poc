@@ -8,7 +8,7 @@ This note condenses the architecture narrative from `README.md` and `docs/flow-d
 | RAG Retriever | Fetch dense docs from Qdrant/Chroma, apply HEAT filters, emit citations for evaluator + audit logs, and write long-term context back to memory writer. | `src/graph/nodes/rag.py`, `scripts/ingest.py`, `data/knowledge_base/*` |
 | GraphRAG Node | Walk lightweight entity graph snapshots, stitch relationship summaries, and back off to basic RAG when traversal fails. | `src/graph/nodes/graph_rag.py`, `data/graph/` |
 | SkillHub Node | Dynamically loads registered tool packs (`skills/registry.yaml`) and MCP servers; default filesystem MCP is scoped to `data/knowledge_base`. | `src/graph/nodes/skills.py`, `configs/mcp_tools.yaml`, `skills/` |
-| Memory Layer | Combines SQLite checkpoints for short-term history with `TemporalMemoryStore` for timestamped insights, categories, and TTL enforcement. | `src/memory/checkpointer.py`, `src/memory/temporal.py`, `docs/plan.md#Phase-1` |
+| Memory Layer | Combines SQLite checkpoints for short-term history with `TemporalMemoryStore` for timestamped insights, categories, and TTL enforcement. | `src/memory/checkpointer.py`, `src/memory/temporal.py`, `docs/architecture_plan.md` |
 | Swarm Coordinator | Plans tasks, dispatches Researcher/Writer worker nodes, reconciles outputs via weighted vote, and hands off to evaluator. | `src/graph/nodes/swarm.py`, `configs/graph_config.dev.yaml#swarm`, `README.md#What-this-POC-demonstrates` |
 | Evaluator / RAFT Hook | Scores grounding/coverage, logs metrics to `data/metrics/*`, future RAFT plan ensures reviewer feedback loops into router weights. | `src/graph/nodes/evaluator.py`, `docs/raft.md` |
 

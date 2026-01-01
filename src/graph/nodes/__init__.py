@@ -15,9 +15,13 @@ from .langchain_agent import LangChainAgentNode  # noqa: F401
 from .workflow import (  # noqa: F401
     ArchitecturePlannerNode,
     ImplementationPlannerNode,
+    LeadPlannerNode,
+    PlanningResumeNode,
     PlanValidatorNode,
     PlanReviewerNode,
+    ProductOwnerNode,
     TechLeadNode,
+    UiUxDesignerNode,
     WorkflowSelectorNode,
 )
 from .code_review import CodeReviewNode  # noqa: F401

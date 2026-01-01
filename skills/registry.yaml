@@ -15,6 +15,10 @@ packs:
     description: "Bridge to Codex CLI for code generation"
     module: "skills.codex_pack.tools"
     tools: ["request_codex"]
+  gemini_pack:
+    description: "Bridge to Gemini CLI for code generation"
+    module: "skills.gemini_pack.tools"
+    tools: ["request_gemini"]
   lead_pack:
     description: "Architecture + stack decision helpers"
     module: "skills.lead_pack.tools"

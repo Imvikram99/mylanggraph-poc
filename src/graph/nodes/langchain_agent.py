@@ -120,6 +120,13 @@ class LangChainAgentNode:
                 repo_path=repo_ref,
                 branch=repo_branch,
             )
+            instruction = self._format_phase_instruction(
+                idx,
+                phase,
+                plan_request,
+                repo_ref,
+                repo_branch,
+            )
             codex_result = self._invoke_codex(
                 phase_idx=idx,
                 phase=phase,
@@ -129,6 +136,15 @@ class LangChainAgentNode:
                 session_id=session["id"],
                 session_name=session["name"],
                 phase_name=phase_name,
+                instruction=instruction,
+            )
+            metadata.setdefault("codex_requests", []).append(
+                {
+                    "phase": phase_name,
+                    "session_id": session["id"],
+                    "session_name": session["name"],
+                    "instruction": instruction,
+                }
             )
             summary_lines = [
                 f"Phase {idx} – {phase_name}",
@@ -217,8 +233,15 @@ class LangChainAgentNode:
         session_id: str | None,
         session_name: str | None,
         phase_name: str | None,
+        instruction: str | None = None,
     ) -> str:
-        instruction = self._format_phase_instruction(phase_idx, phase, feature_request, repo_path, branch)
+        instruction = instruction or self._format_phase_instruction(
+            phase_idx,
+            phase,
+            feature_request,
+            repo_path,
+            branch,
+        )
         try:
             return request_codex(
                 instruction,

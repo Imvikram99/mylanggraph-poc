@@ -20,7 +20,7 @@ def risk_matrix(feature: str) -> List[str]:
     """Return high-level guardrails the tech lead should echo."""
     feature = feature.strip() or "the requested feature"
     return [
-        f"Reviewer gate blocks {feature} unless docs/plan.md lists the workflow assumptions.",
+        f"Reviewer gate blocks {feature} unless docs/architecture_plan.md lists the workflow assumptions.",
         f"Telemetry must log router_reason=workflow for {feature} to preserve audit parity.",
         f"Fallback to RAG route if FeatureState serialization regresses after adding {feature}.",
     ]

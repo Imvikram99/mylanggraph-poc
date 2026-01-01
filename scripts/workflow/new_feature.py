@@ -29,13 +29,16 @@ def _build_scenario(
     repo_url: Optional[str],
     repo_branch: Optional[str],
     feature: Optional[str],
+    workflow_mode: str,
     plan_only: bool = False,
 ) -> dict:
+    workflow_mode = (workflow_mode or "planning").strip().lower()
     context = {
         "persona": persona,
         "mode": "architect",
         "stack": stack,
         "scenario_id": scenario_id,
+        "workflow_mode": workflow_mode,
     }
     if deadline:
         context["deadline"] = deadline
@@ -49,14 +52,22 @@ def _build_scenario(
         context["feature_request"] = feature
     if plan_only:
         context["plan_only"] = True
+    assertions = [
+        {"type": "metadata", "path": ["metadata", "router_reason"], "equals": "workflow_request"},
+    ]
+    if workflow_mode == "planning":
+        assertions.append({"type": "contains", "value": "Architecture plan drafted"})
+    else:
+        assertions.extend(
+            [
+                {"type": "contains", "value": "Tech Lead Plan"},
+                {"type": "contains", "value": "Phase 1"},
+            ]
+        )
     scenario = {
         "prompt": prompt,
         "context": context,
-        "assertions": [
-            {"type": "metadata", "path": ["metadata", "router_reason"], "equals": "workflow_request"},
-            {"type": "contains", "value": "Tech Lead Plan"},
-            {"type": "contains", "value": "Phase 1"},
-        ],
+        "assertions": assertions,
     }
     return scenario
 
@@ -83,6 +94,11 @@ def create(
     repo_url: Optional[str] = typer.Option(None, "--repo-url", help="Git URL to clone if the repo is not local."),
     repo_branch: Optional[str] = typer.Option(None, "--branch", "-b", help="Target Git branch."),
     feature: Optional[str] = typer.Option(None, "--feature", "-f", help="Short feature label."),
+    workflow_mode: str = typer.Option(
+        "planning",
+        "--workflow-mode",
+        help="Workflow mode: planning (default), full, or from_planning.",
+    ),
     output: Path = typer.Option(
         Path("demo/feature_request_generated.yaml"),
         "--output",
@@ -102,6 +118,7 @@ def create(
         repo_url,
         repo_branch,
         feature,
+        workflow_mode,
         plan_only,
     )
     _write_scenario(scenario, output)
@@ -124,6 +141,11 @@ def run_feature(
     save: Optional[Path] = typer.Option(None, "--save", "-o", help="Optional path to save the generated scenario."),
     prep_only: bool = typer.Option(False, "--prep-only", help="Only prepare the repo/branch and exit without running the workflow."),
     plan_only: bool = typer.Option(False, "--plan-only", help="Stop after planning (skip repo execution/Codex phases)."),
+    workflow_mode: str = typer.Option(
+        "planning",
+        "--workflow-mode",
+        help="Workflow mode: planning (default), full, or from_planning.",
+    ),
 ):
     """Create and immediately run a feature workflow scenario."""
     scenario = _build_scenario(
@@ -136,6 +158,7 @@ def run_feature(
         repo_url,
         repo_branch,
         feature,
+        workflow_mode,
         plan_only,
     )
     if save:
