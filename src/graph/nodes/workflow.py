@@ -291,6 +291,8 @@ def _normalize_workflow_mode(value: Any) -> str:
         return "from_architect"
     if text in {"from_planning", "from-planning", "fromplanning", "post_planning", "resume"}:
         return "from_planning"
+    if text in {"debugandverify", "debug_and_verify", "debug-and-verify"}:
+        return "debugandverify"
     if text in {"planning", "planning_only", "plan_only", "architecture_only"}:
         return "planning"
     return "planning"
@@ -738,11 +740,11 @@ class PlanningResumeNode:
         state.setdefault("checkpoints", []).append(
             {"phase": "planning_resume", "file": self.architecture_file}
         )
-        if workflow_mode == "from_architect" and not plan.get("review"):
+        if workflow_mode in {"from_architect", "debugandverify"} and not plan.get("review"):
             plan["review"] = {
                 "status": "approved",
                 "skipped": True,
-                "reason": "from_architect resumes after finalized architecture",
+                "reason": f"{workflow_mode} resumes after finalized architecture",
             }
         if _workflow_mode_debug_enabled():
             console.log(
@@ -1079,13 +1081,46 @@ class ImplementationPlannerNode:
 
     def __init__(self, workflow_config: Dict[str, Any] | None = None, template_path: str = "docs/implementation.md") -> None:
         self.template_path = Path(template_path)
-        roles = (workflow_config or {}).get("roles", {})
-        role_config = roles.get("implementation_planner", {}) or {}
+        self.roles = (workflow_config or {}).get("roles", {})
+        self.lead_selector = (workflow_config or {}).get("lead_selector", {}) or {}
+        role_config = self.roles.get("implementation_planner", {}) or {}
         self.role_prompt = role_config.get("prompt")
         self.output_file = _role_output_file(role_config, str(self.template_path))
         self.default_phases = [
-            {"name": "Design Hardening", "focus": "Finalize architecture + docs for {request}."},
-            {"name": "Implementation", "focus": "Land workflow nodes + telemetry for {request}."},
+            {
+                "name": "Design Hardening",
+                "focus": "Finalize architecture + docs for {request}.",
+                "test_policy": "defer",
+            },
+            {
+                "name": "Implementation",
+                "focus": "Land workflow nodes + telemetry for {request}.",
+                "test_policy": "defer",
+            },
+            {
+                "name": "Fullstack Debugger - Backend Build",
+                "owner": "fullstackdebugger",
+                "focus": "Run backend build + unit tests and resolve failures for {request}.",
+                "test_policy": "debugger",
+                "checkpoint_file": "docs/debug_state.md",
+                "debug_steps": ["Backend build + unit tests"],
+            },
+            {
+                "name": "Fullstack Debugger - Frontend Build",
+                "owner": "fullstackdebugger",
+                "focus": "Run frontend build + unit tests and resolve failures for {request}.",
+                "test_policy": "debugger",
+                "checkpoint_file": "docs/debug_state.md",
+                "debug_steps": ["Frontend build + unit tests"],
+            },
+            {
+                "name": "Fullstack Debugger - E2E",
+                "owner": "fullstackdebugger",
+                "focus": "Run end-to-end smoke checks and resolve failures for {request}.",
+                "test_policy": "debugger",
+                "checkpoint_file": "docs/debug_state.md",
+                "debug_steps": ["End-to-end smoke checks (if available)"],
+            },
             {"name": "Validation", "focus": "Run demo scenarios + tests proving {request} works."},
         ]
 
@@ -1096,14 +1131,17 @@ class ImplementationPlannerNode:
             raise ValueError("Implementation planner requires an approved review state.")
         metadata = plan.setdefault("metadata", {})
         metadata["implementation_file"] = self.output_file
-        _dispatch_codex(
-            plan,
-            "implementation_planning",
-            "Break the implementation into phases (Design Hardening, Implementation, Validation) inside "
-            f"{self.output_file}. For each phase list owner, deliverables, and acceptance criteria, and "
-            "capture a machine-readable summary if possible. Only edit the implementation file.",
-            role_prompt=self.role_prompt,
-        )
+        workflow_mode = _normalize_workflow_mode(metadata.get("workflow_mode"))
+        if workflow_mode != "debugandverify":
+            _dispatch_codex(
+                plan,
+                "implementation_planning",
+                "Break the implementation into phases (Design Hardening, Backend Implementation, Frontend Implementation, "
+                "Fullstack Debugger - Backend Build, Fullstack Debugger - Frontend Build, Fullstack Debugger - E2E, Validation) "
+                f"inside {self.output_file}. For each phase list owner, deliverables, and acceptance criteria, and "
+                "capture a machine-readable summary if possible. Only edit the implementation file.",
+                role_prompt=self.role_prompt,
+            )
         template_sections = self._load_template_sections()
         request = plan.get("request") or _last_user_message(state)
         context = state.get("context", {})
@@ -1112,6 +1150,10 @@ class ImplementationPlannerNode:
         scenario_file = context.get("scenario_file") or f"demo/{scenario_id}.yaml"
         owners = context.get("phase_owners") or {}
         lead_role = metadata.get("lead_role")
+        if not lead_role:
+            lead_role = _select_lead_role(self.lead_selector, request, self.roles)
+            if lead_role:
+                metadata["lead_role"] = lead_role
         lead_role_key = str(lead_role or "").strip().lower()
 
         phase_specs = self._build_phase_specs(request, persona, lead_role_key)
@@ -1124,29 +1166,66 @@ class ImplementationPlannerNode:
             owner = owners.get(name) or base.get("owner")
             if not owner:
                 owner = persona if idx == 1 else ("tech_lead" if idx == 2 else "ops")
+            test_policy = str(base.get("test_policy") or "").strip().lower()
+            debug_steps = base.get("debug_steps") or []
+            checkpoint_file = base.get("checkpoint_file")
+            handoff_reports = base.get("handoff_reports") or []
+            sanity_checks = base.get("sanity_checks") or []
             deliverables = [
                 base.get("focus", "").format(request=request),
                 template_sections["template"],
                 template_sections["dependencies"],
             ]
-            acceptance_tests = [
-                template_sections["checklist"],
-                f"Scenario validation: {scenario_file}",
-            ]
+            acceptance_tests = [template_sections["checklist"]]
+            if name.strip().lower() == "validation":
+                acceptance_tests.append(f"Scenario validation: {scenario_file}")
+            else:
+                acceptance_tests.append("Scenario validation deferred to Validation phase.")
+            if test_policy == "defer":
+                deliverables.append(
+                    "Implementation-only phase: skip full builds/tests; run quick sanity checks only."
+                )
+                if sanity_checks:
+                    deliverables.append(f"Sanity checks: {', '.join(str(item) for item in sanity_checks)}")
+                acceptance_tests.append("Record deferred test commands in handoff reports.")
+            elif test_policy == "debugger":
+                deliverables.append("Run full build/test matrix and fix failures.")
+                if debug_steps:
+                    deliverables.append(
+                        "Debugger steps: " + "; ".join(str(item) for item in debug_steps)
+                    )
+                if checkpoint_file:
+                    deliverables.append(f"Checkpoint progress in {checkpoint_file}.")
+                acceptance_tests.append("Backend/frontend test reports updated with actual results.")
             owners_list = _coerce_list(owner)
             if not owners_list:
                 owners_list = [str(owner)]
-            phases.append(
-                {
-                    "name": name,
-                    "owners": owners_list,
-                    "deliverables": deliverables,
-                    "acceptance_tests": acceptance_tests,
-                    "owner": owners_list[0] if owners_list else owner,
-                    "acceptance": acceptance_tests,
-                }
-            )
+            phase_entry = {
+                "name": name,
+                "owners": owners_list,
+                "deliverables": deliverables,
+                "acceptance_tests": acceptance_tests,
+                "owner": owners_list[0] if owners_list else owner,
+                "acceptance": acceptance_tests,
+            }
+            if test_policy:
+                phase_entry["test_policy"] = test_policy
+            if debug_steps:
+                phase_entry["debug_steps"] = debug_steps
+            if checkpoint_file:
+                phase_entry["checkpoint_file"] = checkpoint_file
+            if handoff_reports:
+                phase_entry["handoff_reports"] = handoff_reports
+            if sanity_checks:
+                phase_entry["sanity_checks"] = sanity_checks
+            phases.append(phase_entry)
 
+        if workflow_mode == "debugandverify":
+            phases = [
+                phase
+                for phase in phases
+                if phase.get("test_policy") == "debugger" or str(phase.get("name", "")).lower() == "validation"
+            ]
         plan["phases"] = phases
         artifact = {
             "type": "phases",
@@ -1165,29 +1244,102 @@ class ImplementationPlannerNode:
         return state
 
     @staticmethod
-    def _build_phase_specs(request: str, persona: str, lead_role: str) -> List[Dict[str, str]]:
+    def _build_phase_specs(request: str, persona: str, lead_role: str) -> List[Dict[str, Any]]:
+        backend_report = None
+        if lead_role == "lead_java":
+            backend_report = "docs/backend_test_report_java.md"
+        elif lead_role == "lead_python":
+            backend_report = "docs/backend_test_report_python.md"
+        elif lead_role:
+            backend_report = "docs/backend_test_report.md"
+        include_frontend = lead_role in {"lead_java", "lead_python", "lead_react"}
+        debug_reports: List[str] = []
+        if backend_report:
+            debug_reports.append(backend_report)
+        if include_frontend:
+            debug_reports.append("docs/frontend_test_report.md")
+
         if lead_role in {"lead_java", "lead_python"}:
             return [
-                {"name": "Design Hardening", "owner": persona, "focus": "Finalize architecture + docs for {request}."},
+                {
+                    "name": "Design Hardening",
+                    "owner": persona,
+                    "focus": "Finalize architecture + docs for {request}.",
+                    "test_policy": "defer",
+                },
                 {
                     "name": "Backend Implementation",
                     "owner": lead_role,
-                    "focus": "Implement backend APIs for {request} using docs/api_spec.md and capture test evidence.",
+                    "focus": "Implement backend APIs for {request} using docs/api_spec.md.",
+                    "test_policy": "defer",
+                    "sanity_checks": ["Quick compile/lint if fast"],
                 },
                 {
                     "name": "Frontend Implementation",
                     "owner": "lead_react",
                     "focus": "Implement UI flows for {request} based on docs/ui_ux_plan.md and API specs.",
+                    "test_policy": "defer",
+                    "sanity_checks": ["Quick lint/build if fast"],
+                },
+                {
+                    "name": "Fullstack Debugger - Backend Build",
+                    "owner": "fullstackdebugger",
+                    "focus": "Run backend build + unit tests and resolve failures for {request}.",
+                    "test_policy": "debugger",
+                    "checkpoint_file": "docs/debug_state.md",
+                    "debug_steps": ["Backend build + unit tests"],
+                    "handoff_reports": [path for path in debug_reports if "backend" in path],
+                },
+                {
+                    "name": "Fullstack Debugger - Frontend Build",
+                    "owner": "fullstackdebugger",
+                    "focus": "Run frontend build + unit tests and resolve failures for {request}.",
+                    "test_policy": "debugger",
+                    "checkpoint_file": "docs/debug_state.md",
+                    "debug_steps": ["Frontend build + unit tests"],
+                    "handoff_reports": [path for path in debug_reports if "frontend" in path],
+                },
+                {
+                    "name": "Fullstack Debugger - E2E",
+                    "owner": "fullstackdebugger",
+                    "focus": "Run end-to-end smoke checks and resolve failures for {request}.",
+                    "test_policy": "debugger",
+                    "checkpoint_file": "docs/debug_state.md",
+                    "debug_steps": ["End-to-end smoke checks (if available)"],
                 },
                 {"name": "Validation", "owner": "ops", "focus": "Run demo scenarios + tests proving {request} works."},
             ]
         if lead_role == "lead_react":
             return [
-                {"name": "Design Hardening", "owner": persona, "focus": "Finalize architecture + docs for {request}."},
+                {
+                    "name": "Design Hardening",
+                    "owner": persona,
+                    "focus": "Finalize architecture + docs for {request}.",
+                    "test_policy": "defer",
+                },
                 {
                     "name": "Frontend Implementation",
                     "owner": "lead_react",
                     "focus": "Implement UI flows for {request} based on docs/ui_ux_plan.md and API specs.",
+                    "test_policy": "defer",
+                    "sanity_checks": ["Quick lint/build if fast"],
+                },
+                {
+                    "name": "Fullstack Debugger - Frontend Build",
+                    "owner": "fullstackdebugger",
+                    "focus": "Run frontend build + unit tests and resolve failures for {request}.",
+                    "test_policy": "debugger",
+                    "checkpoint_file": "docs/debug_state.md",
+                    "debug_steps": ["Frontend build + unit tests"],
+                    "handoff_reports": [path for path in debug_reports if "frontend" in path],
+                },
+                {
+                    "name": "Fullstack Debugger - E2E",
+                    "owner": "fullstackdebugger",
+                    "focus": "Run end-to-end smoke checks and resolve failures for {request}.",
+                    "test_policy": "debugger",
+                    "checkpoint_file": "docs/debug_state.md",
+                    "debug_steps": ["End-to-end smoke checks (if available)"],
                 },
                 {"name": "Validation", "owner": "ops", "focus": "Run demo scenarios + tests proving {request} works."},
             ]

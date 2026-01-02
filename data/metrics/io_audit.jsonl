@@ -62,3 +62,6 @@
 {"scenario_id":"feature_request","valid_input":true,"valid_output":false,"route":"workflow","workflow_phase":"architecture","errors":["missing_evaluations"]}
 {"scenario_id":"feature_request","valid_input":true,"valid_output":false,"route":"workflow","workflow_phase":"architecture","errors":["missing_evaluations"]}
 {"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","workflow_phase":"implementation","errors":[]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":false,"route":null,"workflow_phase":null,"errors":["'_GeneratorContextManager' object has no attribute 'get_next_version'"]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":false,"route":null,"workflow_phase":null,"errors":["TaggedSqliteSaver.put() takes from 3 to 4 positional arguments but 5 were given"]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","workflow_phase":"implementation","errors":[]}

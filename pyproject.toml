@@ -13,6 +13,7 @@ authors = [
 ]
 dependencies = [
   "langgraph>=0.2.10",
+  "langgraph-checkpoint-sqlite>=0.1.0",
   "langchain>=0.2.9",
   "langchain-core>=0.2.24",
   "langchain-community>=0.2.11",

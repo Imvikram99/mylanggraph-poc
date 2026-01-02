@@ -90,6 +90,18 @@ class LangChainAgentNode:
         checkpoints = state.setdefault("checkpoints", [])
         repo_workspace, prep_log = self._prepare_repo_workspace(state)
         phase_exec = metadata.setdefault("phase_execution", {})
+        phase_statuses = phase_exec.setdefault("phase_statuses", {})
+        resume_enabled = bool((state.get("context") or {}).get("resume"))
+        if resume_enabled and not phase_statuses:
+            phase_statuses.update(self._derive_phase_statuses(phase_exec, checkpoints))
+        completed_phases = {
+            name for name, status in phase_statuses.items() if status == "completed"
+        }
+        if resume_enabled and completed_phases:
+            console.log(
+                "[yellow]Resume enabled; skipping completed phases:[/] "
+                + ", ".join(sorted(completed_phases))
+            )
         backend_required = self._plan_requires_backend(phases) and repo_workspace is not None
         backend_handoff_ready = bool(phase_exec.get("backend_handoff_ready"))
         if backend_required:
@@ -118,6 +130,7 @@ class LangChainAgentNode:
                     summary_lines.append(f"Repo: {repo_ref}{f' (branch {repo_branch})' if repo_branch else ''}")
                 phase_output = "\n".join(summary_lines)
                 phase_outputs.append(phase_output)
+                phase_statuses[phase_name] = "blocked"
                 checkpoints.append(
                     {
                         "phase": phase_name,
@@ -129,6 +142,16 @@ class LangChainAgentNode:
                 phase_exec.setdefault("blocked", []).append(
                     {"phase": phase_name, "reason": "backend_handoff_missing"}
                 )
+                continue
+            if resume_enabled and phase_name in completed_phases:
+                summary_lines = [
+                    f"Phase {idx} – {phase_name}",
+                    f"Owner: {owner_label}",
+                    "Status: skipped (resume)",
+                ]
+                if repo_ref:
+                    summary_lines.append(f"Repo: {repo_ref}{f' (branch {repo_branch})' if repo_branch else ''}")
+                phase_outputs.append("\n".join(summary_lines))
                 continue
             sandbox_cmd = f"phase_{idx}_{phase.get('name', 'unknown').replace(' ', '_').lower()}"
             if repo_workspace:
@@ -171,6 +194,8 @@ class LangChainAgentNode:
                     "instruction": instruction,
                 }
             )
+            phase_success = self._codex_success(codex_result)
+            phase_statuses[phase_name] = "completed" if phase_success else "failed"
             handoff_report = None
             followup_result = None
             if is_backend_phase and repo_workspace:
@@ -287,7 +312,7 @@ class LangChainAgentNode:
                 {
                     "phase": phase_name,
                     "owners": owners,
-                    "status": "executed",
+                    "status": "completed" if phase_success else "failed",
                 }
             )
             phase_exec.setdefault("codex_calls", []).append(
@@ -385,6 +410,10 @@ class LangChainAgentNode:
     ) -> str:
         name = phase.get("name") or f"Phase {idx}"
         owners = self._phase_owners(phase)
+        test_policy = str(phase.get("test_policy") or "").strip().lower()
+        debug_steps = phase.get("debug_steps") or []
+        checkpoint_file = phase.get("checkpoint_file")
+        handoff_reports = phase.get("handoff_reports") or []
         is_backend_phase, is_frontend_phase = self._phase_role_flags(owners)
         report_path = None
         if is_backend_phase:
@@ -409,23 +438,60 @@ class LangChainAgentNode:
             lines.extend(f"- {item}" for item in acceptance)
         else:
             lines.append("- (not specified)")
+        if test_policy == "debugger" and checkpoint_file:
+            lines.append(f"Checkpoint file: {checkpoint_file} (read if it exists, update after each step).")
+        if debug_steps:
+            lines.append("Debugger steps:")
+            lines.extend(f"- {step}" for step in debug_steps)
         if is_backend_phase and report_path:
-            lines.extend(
-                [
-                    "Backend handoff requirements:",
-                    f"- Record Build, Tests, Run, and API Tests sections in {report_path}.",
-                    "- Include exact commands, outcomes, and any failures/waivers.",
-                ]
-            )
+            if test_policy == "defer":
+                lines.extend(
+                    [
+                        "Backend handoff requirements (tests deferred):",
+                        f"- Record Build, Tests, Run, and API Tests sections in {report_path}.",
+                        "- Do not run the commands yet; mark them as deferred.",
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        "Backend handoff requirements:",
+                        f"- Record Build, Tests, Run, and API Tests sections in {report_path}.",
+                        "- Include exact commands, outcomes, and any failures/waivers.",
+                    ]
+                )
         if is_frontend_phase and report_path:
-            lines.extend(
-                [
-                    "Frontend handoff requirements:",
-                    f"- Record Screens, Buttons, Flows, and UI Tests sections in {report_path}.",
-                    "- Include exact commands, outcomes, and any failures/waivers.",
-                ]
+            if test_policy == "defer":
+                lines.extend(
+                    [
+                        "Frontend handoff requirements (tests deferred):",
+                        f"- Record Screens, Buttons, Flows, and UI Tests sections in {report_path}.",
+                        "- Do not run the commands yet; mark them as deferred.",
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        "Frontend handoff requirements:",
+                        f"- Record Screens, Buttons, Flows, and UI Tests sections in {report_path}.",
+                        "- Include exact commands, outcomes, and any failures/waivers.",
+                    ]
+                )
+        if handoff_reports:
+            lines.append("Debugger report updates:")
+            lines.extend(f"- Update {path} with actual commands and results." for path in handoff_reports)
+        if test_policy == "defer":
+            lines.append(
+                "Implement code only. Skip full builds/tests; run quick sanity checks if fast."
             )
-        lines.append("Please implement this phase, run relevant tests, and ensure outputs align with guardrails.")
+        elif test_policy == "debugger":
+            lines.append(
+                "Run the debugger steps, fix failures, and update the checkpoint on time limits."
+            )
+        else:
+            lines.append(
+                "Please implement this phase, run relevant tests, and ensure outputs align with guardrails."
+            )
         return "\n".join(lines)
 
     @staticmethod
@@ -461,6 +527,37 @@ class LangChainAgentNode:
     @staticmethod
     def _frontend_report_path() -> str:
         return "docs/frontend_test_report.md"
+
+    @staticmethod
+    def _codex_success(result: str | None) -> bool:
+        if not result:
+            return False
+        lowered = result.lower()
+        if "exit=0" in lowered and "timed out" not in lowered and "error" not in lowered:
+            return True
+        return False
+
+    @classmethod
+    def _derive_phase_statuses(
+        cls,
+        phase_exec: Dict[str, Any],
+        checkpoints: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        statuses: Dict[str, str] = {}
+        for checkpoint in checkpoints:
+            phase = checkpoint.get("phase")
+            status = checkpoint.get("status")
+            if not phase or not status:
+                continue
+            normalized = "completed" if status == "executed" else str(status)
+            statuses[phase] = normalized
+        for call in phase_exec.get("codex_calls", []):
+            phase = call.get("phase")
+            if not phase or phase in statuses:
+                continue
+            result = call.get("result")
+            statuses[phase] = "completed" if cls._codex_success(result) else "failed"
+        return statuses
 
     @staticmethod
     def _report_status(

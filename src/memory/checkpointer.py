@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -20,9 +21,9 @@ class TaggedSqliteSaver:
     def __init__(self, inner) -> None:
         self.inner = inner
 
-    def put(self, config, checkpoint, metadata=None):  # pragma: no cover - thin wrapper
+    def put(self, config, checkpoint, metadata=None, *args, **kwargs):  # pragma: no cover - thin wrapper
         metadata = self._augment_metadata(config, metadata, checkpoint)
-        return self.inner.put(config, checkpoint, metadata)
+        return self.inner.put(config, checkpoint, metadata, *args, **kwargs)
 
     def _augment_metadata(self, config: Dict[str, Any], metadata: Optional[Dict[str, Any]], checkpoint: Dict[str, Any]):
         metadata = metadata or {}
@@ -52,5 +53,6 @@ def build_checkpointer(db_path: Optional[str] = None):
         return None
     path = Path(db_path or "data/memory/checkpointer.sqlite")
     path.parent.mkdir(parents=True, exist_ok=True)
-    saver = SqliteSaver.from_conn_string(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=False)
+    saver = SqliteSaver(conn)
     return TaggedSqliteSaver(saver)

@@ -120,6 +120,15 @@ roles:
       - Avoid tight coupling between nodes; prefer loosely-bound interfaces.
       - Provide build + run commands and API test coverage expectations.
 
+  fullstackdebugger:
+    output_file: docs/fullstack_debugger_report.md
+    prompt: >
+      You are a senior fullstack debugger with deep Java + React expertise.
+      Your job is to turn failing builds/tests into green runs. Work iteratively
+      with clear checkpoints, minimal changes, and precise log capture. When
+      you hit time limits, write a short progress checkpoint so the next
+      session can resume from the last failing step.
+
   product_owner:
     runner: codex
     output_file: docs/product_plan.md

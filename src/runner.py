@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -92,6 +93,49 @@ def _invoke_metadata(state: Dict[str, Any], payload: ScenarioInput) -> Dict[str,
     }
 
 
+def _build_thread_id(payload: ScenarioInput) -> str:
+    context = payload.context or {}
+    parts = [
+        str(context.get("scenario_id") or payload.id or ""),
+        str(context.get("workflow_mode") or ""),
+        str(context.get("repo_path") or context.get("repo") or ""),
+        str(context.get("target_branch") or context.get("branch") or ""),
+        str(payload.prompt or ""),
+    ]
+    raw = "|".join(parts)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _build_run_config(metadata: Dict[str, Any], thread_id: str) -> Dict[str, Any]:
+    return {
+        "metadata": metadata,
+        "configurable": {"thread_id": thread_id},
+    }
+
+
+def _maybe_resume_state(
+    graph,
+    run_config: Dict[str, Any],
+    state: Dict[str, Any],
+    scenario_input: ScenarioInput,
+) -> tuple[Dict[str, Any], bool]:
+    resume_enabled = os.getenv("WORKFLOW_RESUME", "true").lower() not in {"0", "false", "no"}
+    if not resume_enabled:
+        return state, False
+    if not getattr(graph, "checkpointer", None):
+        return state, False
+    try:
+        snapshot = graph.get_state(run_config)
+    except Exception:
+        return state, False
+    if not snapshot or not snapshot.values:
+        return state, False
+    context = dict((snapshot.values or {}).get("context") or {})
+    context.update(scenario_input.context or {})
+    context["resume"] = True
+    return {"context": context}, True
+
+
 def execute_scenario(
     payload: Dict[str, Any] | ScenarioInput,
     scenario_name: str,
@@ -116,10 +160,10 @@ def stream_scenario(
 ):
     load_dotenv()
     scenario_input = payload if isinstance(payload, ScenarioInput) else _validate_input(payload, scenario_name)
-    graph, state, metadata, tracker = _prepare_run(scenario_input, scenario_name, graph_config)
+    graph, state, run_config, tracker = _prepare_run(scenario_input, scenario_name, graph_config)
     final_state = state
     try:
-        for event in graph.stream(state, config={"metadata": metadata}):
+        for event in graph.stream(state, config=run_config):
             label, payload = _normalize_event(event)
             if isinstance(payload, dict) and "messages" in payload:
                 final_state = payload
@@ -145,9 +189,9 @@ def _execute_validated_scenario(
     stream: bool,
     graph_config: Path | None,
 ):
-    graph, state, metadata, tracker = _prepare_run(scenario_input, scenario_name, graph_config)
+    graph, state, run_config, tracker = _prepare_run(scenario_input, scenario_name, graph_config)
     try:
-        result = _run_graph(graph, state, metadata, stream)
+        result = _run_graph(graph, state, run_config, stream)
     except Exception as exc:
         _audit_run(scenario_input, None, errors=[str(exc)])
         _finalize_monitor(tracker, scenario_input, None)
@@ -164,24 +208,30 @@ def _prepare_run(
 ):
     state = _initial_state(scenario_input, scenario_name)
     metadata = _invoke_metadata(state, scenario_input)
+    thread_id = _build_thread_id(scenario_input)
+    metadata["thread_id"] = thread_id
+    run_config = _build_run_config(metadata, thread_id)
     config_path = _resolve_graph_config(graph_config)
     checkpointer = build_checkpointer()
     tracker = CostLatencyTracker()
     graph = build_agent_graph(config_path=config_path, checkpointer=checkpointer, monitor=tracker)
-    return graph, state, metadata, tracker
+    state, resumed = _maybe_resume_state(graph, run_config, state, scenario_input)
+    if resumed:
+        metadata["resume"] = True
+    return graph, state, run_config, tracker
 
 
-def _run_graph(graph, state: Dict[str, Any], metadata: Dict[str, Any], stream: bool):
+def _run_graph(graph, state: Dict[str, Any], run_config: Dict[str, Any], stream: bool):
     if stream and hasattr(graph, "stream"):
-        return _stream_run(graph, state, metadata)
-    return graph.invoke(state, config={"metadata": metadata})
+        return _stream_run(graph, state, run_config)
+    return graph.invoke(state, config=run_config)
 
 
-def _stream_run(graph, state: Dict[str, Any], metadata: Dict[str, Any]):
+def _stream_run(graph, state: Dict[str, Any], run_config: Dict[str, Any]):
     logger = TelemetryLogger()
     try:
         final_state = state
-        for event in graph.stream(state, config={"metadata": metadata}):
+        for event in graph.stream(state, config=run_config):
             label, payload = _normalize_event(event)
             logger.log(label, payload)
             console.log(f"[blue]stream[/] {label}: {payload}")

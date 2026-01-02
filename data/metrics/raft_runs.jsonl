@@ -55,3 +55,5 @@
 {"ts": "2025-12-30T17:02:28.237639+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "reward_score": 0.0, "score": 0.75}
 {"ts": "2025-12-30T18:14:20.029160+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "reward_score": 0.0, "score": 0.75}
 {"ts": "2026-01-02T03:26:00.692085+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 1.0, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "reward_score": 0.0, "score": 0.75}
+{"ts": "2026-01-02T05:11:50.384537+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 0.3333333333333333, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "reward_score": 0.0, "score": 0.55}
+{"ts": "2026-01-02T05:34:43.937915+00:00", "route": "workflow", "scenario": "feature_request", "grounding": 0.3333333333333333, "completeness": 1.0, "phase_coverage": 1.0, "review_status": "approved", "reward_score": 0.0, "score": 0.55}

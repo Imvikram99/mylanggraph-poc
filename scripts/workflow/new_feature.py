@@ -27,6 +27,8 @@ def _normalize_workflow_mode(value: Optional[str]) -> str:
         return "from_architect"
     if text in {"from_planning", "from-planning", "fromplanning", "post_planning", "resume"}:
         return "from_planning"
+    if text in {"debugandverify", "debug_and_verify", "debug-and-verify"}:
+        return "debugandverify"
     if text in {"planning", "planning_only", "plan_only", "architecture_only"}:
         return "planning"
     return "planning"
@@ -110,7 +112,7 @@ def create(
     workflow_mode: str = typer.Option(
         "planning",
         "--workflow-mode",
-        help="Workflow mode: planning (default), full, from_planning, or from_architect.",
+        help="Workflow mode: planning (default), full, from_planning, from_architect, or debugandverify.",
     ),
     output: Path = typer.Option(
         Path("demo/feature_request_generated.yaml"),
@@ -157,7 +159,7 @@ def run_feature(
     workflow_mode: str = typer.Option(
         "planning",
         "--workflow-mode",
-        help="Workflow mode: planning (default), full, from_planning, or from_architect.",
+        help="Workflow mode: planning (default), full, from_planning, from_architect, or debugandverify.",
     ),
 ):
     """Create and immediately run a feature workflow scenario."""

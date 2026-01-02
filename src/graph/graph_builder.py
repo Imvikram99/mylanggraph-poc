@@ -66,6 +66,8 @@ def _workflow_mode_from_state(state: Dict[str, Any]) -> str:
         normalized = "from_architect"
     if text in {"from_planning", "from-planning", "fromplanning", "post_planning", "resume"}:
         normalized = "from_planning"
+    if text in {"debugandverify", "debug_and_verify", "debug-and-verify"}:
+        normalized = "debugandverify"
     if text in {"planning", "planning_only", "plan_only", "architecture_only"}:
         normalized = "planning"
     if os.getenv("WORKFLOW_MODE_DEBUG", "").lower() in {"1", "true", "yes"}:
@@ -181,16 +183,20 @@ def build_agent_graph(
     graph.add_conditional_edges(
         "workflow_selector",
         lambda state: "planning_resume"
-        if _workflow_mode_from_state(state) in ("from_planning", "from_architect")
+        if _workflow_mode_from_state(state) in ("from_planning", "from_architect", "debugandverify")
         else "product_owner",
         {"planning_resume": "planning_resume", "product_owner": "product_owner"},
     )
     graph.add_conditional_edges(
         "planning_resume",
-        lambda state: "lead_planner"
-        if _workflow_mode_from_state(state) == "from_architect"
-        else "plan_reviewer",
-        {"lead_planner": "lead_planner", "plan_reviewer": "plan_reviewer"},
+        lambda state: "implementation_planner"
+        if _workflow_mode_from_state(state) == "debugandverify"
+        else ("lead_planner" if _workflow_mode_from_state(state) == "from_architect" else "plan_reviewer"),
+        {
+            "lead_planner": "lead_planner",
+            "plan_reviewer": "plan_reviewer",
+            "implementation_planner": "implementation_planner",
+        },
     )
     graph.add_edge("product_owner", "ui_ux_design")
     graph.add_edge("ui_ux_design", "architecture_planner")
@@ -212,7 +218,13 @@ def build_agent_graph(
     )
     graph.add_edge("lead_planner", "tech_lead")
     graph.add_edge("tech_lead", "implementation_planner")
-    graph.add_edge("implementation_planner", "plan_validator")
+    graph.add_conditional_edges(
+        "implementation_planner",
+        lambda state: "langchain_agent"
+        if _workflow_mode_from_state(state) == "debugandverify"
+        else "plan_validator",
+        {"langchain_agent": "langchain_agent", "plan_validator": "plan_validator"},
+    )
     graph.add_conditional_edges(
         "plan_validator",
         plan_validator.branch,
