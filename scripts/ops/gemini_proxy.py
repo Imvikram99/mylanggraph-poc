@@ -20,11 +20,6 @@ PROMPT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 app = typer.Typer(help="Relay workflow instructions to the Gemini Code CLI.")
 
 
-@app.callback()
-def main():
-    """Relay workflow instructions to the Gemini Code CLI."""
-
-
 def dispatch(
     instruction: str,
     repo_path: Optional[str] = None,

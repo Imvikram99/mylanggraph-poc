@@ -1103,7 +1103,10 @@ class ImplementationPlannerNode:
                 "focus": "Run backend build + unit tests and resolve failures for {request}.",
                 "test_policy": "debugger",
                 "checkpoint_file": "docs/debug_state.md",
-                "debug_steps": ["Backend build + unit tests"],
+                "debug_steps": [
+                    "Backend build + unit tests",
+                    "Start backend server and curl a feature API endpoint from docs/api_spec.md or the plan; assert HTTP 200",
+                ],
             },
             {
                 "name": "Fullstack Debugger - Frontend Build",
@@ -1111,7 +1114,11 @@ class ImplementationPlannerNode:
                 "focus": "Run frontend build + unit tests and resolve failures for {request}.",
                 "test_policy": "debugger",
                 "checkpoint_file": "docs/debug_state.md",
-                "debug_steps": ["Frontend build + unit tests"],
+                "debug_steps": [
+                    "Frontend build + unit tests",
+                    "Start frontend against a running backend; exercise a key UI flow or API call from docs/api_spec.md or the plan and assert HTTP 200",
+                    "Confirm key UI changes (new screens or enhancements) are visible and wired to the expected actions.",
+                ],
             },
             {
                 "name": "Fullstack Debugger - E2E",
@@ -1196,6 +1203,17 @@ class ImplementationPlannerNode:
                     )
                 if checkpoint_file:
                     deliverables.append(f"Checkpoint progress in {checkpoint_file}.")
+                if "backend" in name.strip().lower():
+                    acceptance_tests.append(
+                        "API smoke test returns HTTP 200 for a feature endpoint from docs/api_spec.md or the plan."
+                    )
+                if "frontend" in name.strip().lower():
+                    acceptance_tests.append(
+                        "Frontend integration smoke confirms a key UI flow or API call returns HTTP 200."
+                    )
+                    acceptance_tests.append(
+                        "Key UI changes (new screens or enhancements) are present and match the plan."
+                    )
                 acceptance_tests.append("Backend/frontend test reports updated with actual results.")
             owners_list = _coerce_list(owner)
             if not owners_list:
@@ -1287,7 +1305,10 @@ class ImplementationPlannerNode:
                     "focus": "Run backend build + unit tests and resolve failures for {request}.",
                     "test_policy": "debugger",
                     "checkpoint_file": "docs/debug_state.md",
-                    "debug_steps": ["Backend build + unit tests"],
+                    "debug_steps": [
+                        "Backend build + unit tests",
+                        "Start backend server and curl a feature API endpoint from docs/api_spec.md or the plan; assert HTTP 200",
+                    ],
                     "handoff_reports": [path for path in debug_reports if "backend" in path],
                 },
                 {
@@ -1296,7 +1317,11 @@ class ImplementationPlannerNode:
                     "focus": "Run frontend build + unit tests and resolve failures for {request}.",
                     "test_policy": "debugger",
                     "checkpoint_file": "docs/debug_state.md",
-                    "debug_steps": ["Frontend build + unit tests"],
+                    "debug_steps": [
+                        "Frontend build + unit tests",
+                        "Start frontend against a running backend; exercise a key UI flow or API call from docs/api_spec.md or the plan and assert HTTP 200",
+                        "Confirm key UI changes (new screens or enhancements) are visible and wired to the expected actions.",
+                    ],
                     "handoff_reports": [path for path in debug_reports if "frontend" in path],
                 },
                 {
@@ -1330,7 +1355,11 @@ class ImplementationPlannerNode:
                     "focus": "Run frontend build + unit tests and resolve failures for {request}.",
                     "test_policy": "debugger",
                     "checkpoint_file": "docs/debug_state.md",
-                    "debug_steps": ["Frontend build + unit tests"],
+                    "debug_steps": [
+                        "Frontend build + unit tests",
+                        "Start frontend against a running backend; exercise a key UI flow or API call from docs/api_spec.md or the plan and assert HTTP 200",
+                        "Confirm key UI changes (new screens or enhancements) are visible and wired to the expected actions.",
+                    ],
                     "handoff_reports": [path for path in debug_reports if "frontend" in path],
                 },
                 {

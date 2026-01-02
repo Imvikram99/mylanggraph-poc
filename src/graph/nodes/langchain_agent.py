@@ -10,12 +10,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from skills.codex_pack.tools import request_codex
+from skills.gemini_pack.tools import request_gemini
 from skills.ops_pack.tools import (
     prepare_repo,
     resolve_repo_workspace,
     run_repo_command,
     run_sandboxed,
 )
+from ...observability.command_runs import extract_report_commands, load_command_hints, log_report_commands
 
 try:  # pragma: no cover - optional dependency components
     from langchain.agents import AgentType, Tool, initialize_agent
@@ -175,6 +177,14 @@ class LangChainAgentNode:
                 repo_ref,
                 repo_branch,
             )
+            test_policy = str(phase.get("test_policy") or "").strip().lower()
+            if repo_ref and test_policy == "debugger":
+                hints = load_command_hints(repo_path=repo_ref, phase=phase_name)
+                if hints:
+                    instruction = (
+                        f"{instruction}\n\nKnown build/test fixes from prior runs:\n"
+                        + "\n".join(f"- {hint}" for hint in hints)
+                    )
             codex_result = self._invoke_codex(
                 phase_idx=idx,
                 phase=phase,
@@ -194,8 +204,6 @@ class LangChainAgentNode:
                     "instruction": instruction,
                 }
             )
-            phase_success = self._codex_success(codex_result)
-            phase_statuses[phase_name] = "completed" if phase_success else "failed"
             handoff_report = None
             followup_result = None
             if is_backend_phase and repo_workspace:
@@ -282,6 +290,131 @@ class LangChainAgentNode:
                     )
                     handoff_report = self._report_status(repo_workspace, report_path, required_sections)
                 phase_exec.setdefault("handoff_reports", {})[phase_name] = handoff_report
+            report_paths: List[str] = []
+            if is_backend_phase:
+                report_paths.append(self._backend_report_path(owners))
+            elif is_frontend_phase:
+                report_paths.append(self._frontend_report_path())
+            if repo_workspace and repo_ref and report_paths:
+                log_report_commands(
+                    repo_workspace=repo_workspace,
+                    report_paths=report_paths,
+                    repo_path=repo_ref,
+                    branch=repo_branch,
+                    phase=phase_name,
+                    session_id=session["id"],
+                    session_name=session["name"],
+                )
+            report_failures = []
+            if repo_workspace and repo_ref and report_paths:
+                report_failures = self._report_failures(
+                    repo_workspace=repo_workspace,
+                    report_paths=report_paths,
+                    repo_path=repo_ref,
+                    branch=repo_branch,
+                    phase=phase_name,
+                    session=session,
+                )
+            phase_success = self._codex_success(codex_result)
+            if report_paths:
+                phase_success = not report_failures
+            gemini_result = None
+            gemini_followup_result = None
+            if test_policy == "debugger" and not phase_success:
+                gemini_attempts = phase_exec.setdefault("gemini_attempts", {})
+                if gemini_attempts.get(phase_name, 0) < 1:
+                    gemini_attempts[phase_name] = gemini_attempts.get(phase_name, 0) + 1
+                    suggestion_file = "docs/gemini_debug_suggestions.md"
+                    gemini_session = self._ensure_gemini_session(phase_exec, phase_name, plan_request or "feature")
+                    gemini_instruction = self._gemini_debug_instruction(
+                        feature_request=plan_request,
+                        phase_name=phase_name,
+                        repo_path=repo_ref,
+                        branch=repo_branch,
+                        codex_result=codex_result,
+                        followup_result=followup_result,
+                        failures=report_failures,
+                        suggestion_file=suggestion_file,
+                    )
+                    gemini_result = request_gemini(
+                        gemini_instruction,
+                        repo_path=repo_ref,
+                        branch=repo_branch,
+                        session_id=gemini_session["id"],
+                        session_name=gemini_session["name"],
+                        phase=phase_name,
+                    )
+                    metadata.setdefault("gemini_requests", []).append(
+                        {
+                            "phase": phase_name,
+                            "session_id": gemini_session["id"],
+                            "session_name": gemini_session["name"],
+                            "instruction": gemini_instruction,
+                        }
+                    )
+                    phase_exec.setdefault("gemini_calls", []).append(
+                        {
+                            "phase": phase_name,
+                            "result": gemini_result,
+                            "session_id": gemini_session["id"],
+                        }
+                    )
+                    followup_instruction = self._gemini_followup_instruction(
+                        feature_request=plan_request,
+                        phase_name=phase_name,
+                        repo_path=repo_ref,
+                        branch=repo_branch,
+                        suggestion_file=suggestion_file,
+                        report_paths=report_paths,
+                    )
+                    gemini_followup_result = self._invoke_codex(
+                        phase_idx=idx,
+                        phase=phase,
+                        feature_request=plan_request,
+                        repo_path=repo_ref,
+                        branch=repo_branch,
+                        session_id=session["id"],
+                        session_name=session["name"],
+                        phase_name=f"{phase_name} (gemini follow-up)",
+                        instruction=followup_instruction,
+                    )
+                    metadata.setdefault("codex_requests", []).append(
+                        {
+                            "phase": f"{phase_name} (gemini follow-up)",
+                            "session_id": session["id"],
+                            "session_name": session["name"],
+                            "instruction": followup_instruction,
+                        }
+                    )
+                    phase_exec.setdefault("codex_calls", []).append(
+                        {
+                            "phase": f"{phase_name} (gemini follow-up)",
+                            "result": gemini_followup_result,
+                            "session_id": session["id"],
+                        }
+                    )
+                    if repo_workspace and repo_ref and report_paths:
+                        log_report_commands(
+                            repo_workspace=repo_workspace,
+                            report_paths=report_paths,
+                            repo_path=repo_ref,
+                            branch=repo_branch,
+                            phase=f"{phase_name} (gemini follow-up)",
+                            session_id=session["id"],
+                            session_name=session["name"],
+                        )
+                        report_failures = self._report_failures(
+                            repo_workspace=repo_workspace,
+                            report_paths=report_paths,
+                            repo_path=repo_ref,
+                            branch=repo_branch,
+                            phase=phase_name,
+                            session=session,
+                        )
+                    phase_success = self._codex_success(gemini_followup_result)
+                    if report_paths:
+                        phase_success = not report_failures
+            phase_statuses[phase_name] = "completed" if phase_success else "failed"
             summary_lines = [
                 f"Phase {idx} – {phase_name}",
                 f"Owner: {owner_label}",
@@ -306,6 +439,10 @@ class LangChainAgentNode:
                     summary_lines.append(f"Handoff report missing: {', '.join(missing)}")
             if followup_result:
                 summary_lines.append(f"Codex CLI (handoff follow-up): {followup_result}")
+            if gemini_result:
+                summary_lines.append(f"Gemini CLI: {gemini_result}")
+            if gemini_followup_result:
+                summary_lines.append(f"Codex CLI (gemini follow-up): {gemini_followup_result}")
             phase_output = "\n".join(summary_lines)
             phase_outputs.append(phase_output)
             checkpoints.append(
@@ -666,8 +803,126 @@ class LangChainAgentNode:
         return session
 
     @staticmethod
+    def _ensure_gemini_session(phase_exec: Dict[str, Any], phase_name: str, feature_request: str) -> Dict[str, str]:
+        sessions = phase_exec.setdefault("gemini_sessions", {})
+        session = sessions.get(phase_name)
+        if session:
+            return session
+        session_id = uuid4().hex
+        session_name = f"{feature_request}:{phase_name}:gemini"
+        session = {"id": session_id, "name": session_name}
+        sessions[phase_name] = session
+        return session
+
+    @staticmethod
     def _normalize_role(value: str) -> str:
         return value.strip().lower().replace(" ", "_").replace("-", "_")
+
+    @staticmethod
+    def _report_failures(
+        *,
+        repo_workspace: Path,
+        report_paths: List[str],
+        repo_path: str,
+        branch: str | None,
+        phase: str,
+        session: Dict[str, str],
+    ) -> List[Dict[str, Any]]:
+        failures: List[Dict[str, Any]] = []
+        for report_path in report_paths:
+            full_path = repo_workspace / report_path
+            if not full_path.exists():
+                continue
+            text = full_path.read_text(encoding="utf-8", errors="ignore")
+            entries = extract_report_commands(
+                text,
+                report_path=report_path,
+                repo_path=repo_path,
+                branch=branch,
+                phase=phase,
+                session_id=session.get("id"),
+                session_name=session.get("name"),
+            )
+            failures.extend([entry for entry in entries if entry.get("status") == "failed"])
+        return failures
+
+    @staticmethod
+    def _format_failure_summary(failures: List[Dict[str, Any]]) -> str:
+        if not failures:
+            return "- (no failures captured)"
+        lines: List[str] = []
+        for entry in failures[:3]:
+            section = entry.get("section") or "unknown"
+            command = entry.get("command") or ""
+            workdir = entry.get("workdir") or "."
+            signature = entry.get("error_signature") or ""
+            result_excerpt = entry.get("result_excerpt") or ""
+            lines.append(f"- {section}: `{command}` (workdir: {workdir})")
+            if signature:
+                lines.append(f"  error: {signature}")
+            if result_excerpt:
+                lines.append(f"  result: {result_excerpt[:200]}")
+        if len(failures) > 3:
+            lines.append(f"- ({len(failures) - 3} more failures omitted)")
+        return "\n".join(lines)
+
+    def _gemini_debug_instruction(
+        self,
+        *,
+        feature_request: str,
+        phase_name: str,
+        repo_path: str | None,
+        branch: str | None,
+        codex_result: str | None,
+        followup_result: str | None,
+        failures: List[Dict[str, Any]],
+        suggestion_file: str,
+    ) -> str:
+        summary = self._format_failure_summary(failures)
+        lines = [
+            "You are a debugging advisor. Provide suggestions only; do NOT implement changes.",
+            f"Feature request: {feature_request or 'unspecified'}",
+            f"Phase: {phase_name}",
+            f"Repo: {repo_path or 'unspecified'}",
+            f"Branch: {branch or 'current'}",
+            "Codex observations:",
+            f"- Codex result: {codex_result or 'n/a'}",
+        ]
+        if followup_result:
+            lines.append(f"- Codex handoff follow-up: {followup_result}")
+        lines.extend(
+            [
+                "Observed failures from test reports:",
+                summary,
+                f"Write a short suggestion list to {suggestion_file}.",
+                "Only edit that file; do not modify code or tests.",
+            ]
+        )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _gemini_followup_instruction(
+        *,
+        feature_request: str,
+        phase_name: str,
+        repo_path: str | None,
+        branch: str | None,
+        suggestion_file: str,
+        report_paths: List[str],
+    ) -> str:
+        report_list = ", ".join(report_paths) if report_paths else "test reports"
+        lines = [
+            f"Feature request: {feature_request or 'unspecified'}",
+            f"Phase: {phase_name} (gemini follow-up)",
+            f"Repo: {repo_path or 'unspecified'}",
+            f"Branch: {branch or 'current'}",
+            "Task:",
+            f"- Read {suggestion_file}.",
+            "- Apply relevant suggestions to fix the failures.",
+            "- Re-run the failing commands from the reports.",
+            f"- Update {report_list} and docs/debug_state.md with results.",
+        ]
+        return "\n".join(lines)
 
     def _load_role_prompts(self, workflow_config: Dict[str, Any] | None) -> Dict[str, str]:
         prompts: Dict[str, str] = {}
