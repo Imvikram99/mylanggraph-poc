@@ -90,6 +90,10 @@ class LangChainAgentNode:
         checkpoints = state.setdefault("checkpoints", [])
         repo_workspace, prep_log = self._prepare_repo_workspace(state)
         phase_exec = metadata.setdefault("phase_execution", {})
+        backend_required = self._plan_requires_backend(phases) and repo_workspace is not None
+        backend_handoff_ready = bool(phase_exec.get("backend_handoff_ready"))
+        if backend_required:
+            phase_exec["backend_required"] = True
         if prep_log:
             phase_exec["repo_prep"] = prep_log
         if repo_workspace:
@@ -98,18 +102,39 @@ class LangChainAgentNode:
         repo_ref = str(repo_workspace) if repo_workspace else None
         plan_request = (state.get("plan") or {}).get("request", "")
         for idx, phase in enumerate(phases, start=1):
-            owners = phase.get("owners") or []
-            if not owners and phase.get("owner"):
-                owners = [phase.get("owner")]
-            owner_label = ", ".join(str(owner) for owner in owners if str(owner).strip()) or "architect"
+            owners = self._phase_owners(phase)
+            owner_label = ", ".join(owners) or "architect"
             deliverables = phase.get("deliverables") or []
             acceptance = phase.get("acceptance_tests") or phase.get("acceptance") or []
+            phase_name = phase.get("name", f"Phase {idx}")
+            is_backend_phase, is_frontend_phase = self._phase_role_flags(owners)
+            if is_frontend_phase and backend_required and not backend_handoff_ready:
+                summary_lines = [
+                    f"Phase {idx} – {phase_name}",
+                    f"Owner: {owner_label}",
+                    "Status: blocked (backend handoff incomplete)",
+                ]
+                if repo_ref:
+                    summary_lines.append(f"Repo: {repo_ref}{f' (branch {repo_branch})' if repo_branch else ''}")
+                phase_output = "\n".join(summary_lines)
+                phase_outputs.append(phase_output)
+                checkpoints.append(
+                    {
+                        "phase": phase_name,
+                        "owners": owners,
+                        "status": "blocked",
+                        "reason": "backend_handoff_missing",
+                    }
+                )
+                phase_exec.setdefault("blocked", []).append(
+                    {"phase": phase_name, "reason": "backend_handoff_missing"}
+                )
+                continue
             sandbox_cmd = f"phase_{idx}_{phase.get('name', 'unknown').replace(' ', '_').lower()}"
             if repo_workspace:
                 repo_cmd = run_repo_command(repo_workspace, f"git status -sb || echo '{sandbox_cmd}'")
             else:
                 repo_cmd = run_sandboxed(f"echo Executing {sandbox_cmd}")
-            phase_name = phase.get("name", f"Phase {idx}")
             session = self._ensure_phase_session(phase_exec, phase_name, plan_request or "feature")
             role_prompt = self._resolve_role_prompt(owners or [owner_label])
             self._maybe_init_phase_session(
@@ -146,6 +171,92 @@ class LangChainAgentNode:
                     "instruction": instruction,
                 }
             )
+            handoff_report = None
+            followup_result = None
+            if is_backend_phase and repo_workspace:
+                report_path = self._backend_report_path(owners)
+                required_sections = ["Build", "Tests", "Run", "API Tests"]
+                handoff_report = self._report_status(repo_workspace, report_path, required_sections)
+                if not handoff_report["ok"]:
+                    followup_instruction = self._handoff_followup_instruction(
+                        feature_request=plan_request,
+                        phase_name=phase_name,
+                        repo_path=repo_ref,
+                        branch=repo_branch,
+                        report_path=report_path,
+                        kind="backend",
+                    )
+                    followup_result = self._invoke_codex(
+                        phase_idx=idx,
+                        phase=phase,
+                        feature_request=plan_request,
+                        repo_path=repo_ref,
+                        branch=repo_branch,
+                        session_id=session["id"],
+                        session_name=session["name"],
+                        phase_name=f"{phase_name} (handoff)",
+                        instruction=followup_instruction,
+                    )
+                    metadata.setdefault("codex_requests", []).append(
+                        {
+                            "phase": f"{phase_name} (handoff)",
+                            "session_id": session["id"],
+                            "session_name": session["name"],
+                            "instruction": followup_instruction,
+                        }
+                    )
+                    phase_exec.setdefault("codex_calls", []).append(
+                        {
+                            "phase": f"{phase_name} (handoff)",
+                            "result": followup_result,
+                            "session_id": session["id"],
+                        }
+                    )
+                    handoff_report = self._report_status(repo_workspace, report_path, required_sections)
+                backend_handoff_ready = handoff_report["ok"]
+                phase_exec["backend_handoff_ready"] = backend_handoff_ready
+                phase_exec.setdefault("handoff_reports", {})[phase_name] = handoff_report
+            elif is_frontend_phase and repo_workspace:
+                report_path = self._frontend_report_path()
+                required_sections = ["Screens", "Buttons", "Flows", "UI Tests"]
+                handoff_report = self._report_status(repo_workspace, report_path, required_sections)
+                if not handoff_report["ok"]:
+                    followup_instruction = self._handoff_followup_instruction(
+                        feature_request=plan_request,
+                        phase_name=phase_name,
+                        repo_path=repo_ref,
+                        branch=repo_branch,
+                        report_path=report_path,
+                        kind="frontend",
+                    )
+                    followup_result = self._invoke_codex(
+                        phase_idx=idx,
+                        phase=phase,
+                        feature_request=plan_request,
+                        repo_path=repo_ref,
+                        branch=repo_branch,
+                        session_id=session["id"],
+                        session_name=session["name"],
+                        phase_name=f"{phase_name} (handoff)",
+                        instruction=followup_instruction,
+                    )
+                    metadata.setdefault("codex_requests", []).append(
+                        {
+                            "phase": f"{phase_name} (handoff)",
+                            "session_id": session["id"],
+                            "session_name": session["name"],
+                            "instruction": followup_instruction,
+                        }
+                    )
+                    phase_exec.setdefault("codex_calls", []).append(
+                        {
+                            "phase": f"{phase_name} (handoff)",
+                            "result": followup_result,
+                            "session_id": session["id"],
+                        }
+                    )
+                    handoff_report = self._report_status(repo_workspace, report_path, required_sections)
+                phase_exec.setdefault("handoff_reports", {})[phase_name] = handoff_report
             summary_lines = [
                 f"Phase {idx} – {phase_name}",
                 f"Owner: {owner_label}",
@@ -161,6 +272,15 @@ class LangChainAgentNode:
             else:
                 summary_lines.append(f"Sandbox: {repo_cmd}")
             summary_lines.append(f"Codex CLI: {codex_result}")
+            if handoff_report:
+                summary_lines.append(
+                    f"Handoff report: {handoff_report['path']} ({handoff_report['status']})"
+                )
+                missing = handoff_report.get("missing_sections")
+                if missing:
+                    summary_lines.append(f"Handoff report missing: {', '.join(missing)}")
+            if followup_result:
+                summary_lines.append(f"Codex CLI (handoff follow-up): {followup_result}")
             phase_output = "\n".join(summary_lines)
             phase_outputs.append(phase_output)
             checkpoints.append(
@@ -264,6 +384,13 @@ class LangChainAgentNode:
         branch: str | None,
     ) -> str:
         name = phase.get("name") or f"Phase {idx}"
+        owners = self._phase_owners(phase)
+        is_backend_phase, is_frontend_phase = self._phase_role_flags(owners)
+        report_path = None
+        if is_backend_phase:
+            report_path = self._backend_report_path(owners)
+        elif is_frontend_phase:
+            report_path = self._frontend_report_path()
         deliverables = phase.get("deliverables") or []
         acceptance = phase.get("acceptance_tests") or phase.get("acceptance") or []
         lines = [
@@ -282,7 +409,110 @@ class LangChainAgentNode:
             lines.extend(f"- {item}" for item in acceptance)
         else:
             lines.append("- (not specified)")
+        if is_backend_phase and report_path:
+            lines.extend(
+                [
+                    "Backend handoff requirements:",
+                    f"- Record Build, Tests, Run, and API Tests sections in {report_path}.",
+                    "- Include exact commands, outcomes, and any failures/waivers.",
+                ]
+            )
+        if is_frontend_phase and report_path:
+            lines.extend(
+                [
+                    "Frontend handoff requirements:",
+                    f"- Record Screens, Buttons, Flows, and UI Tests sections in {report_path}.",
+                    "- Include exact commands, outcomes, and any failures/waivers.",
+                ]
+            )
         lines.append("Please implement this phase, run relevant tests, and ensure outputs align with guardrails.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _phase_owners(phase: Dict[str, Any]) -> List[str]:
+        owners = phase.get("owners") or []
+        if not owners and phase.get("owner"):
+            owners = [phase.get("owner")]
+        return [str(owner) for owner in owners if str(owner).strip()]
+
+    def _phase_role_flags(self, owners: List[str]) -> tuple[bool, bool]:
+        normalized = {self._normalize_role(owner) for owner in owners}
+        backend_roles = {"lead_java", "lead_python", "backend_lead", "backend"}
+        frontend_roles = {"lead_react", "frontend_tech_lead", "lead_frontend", "frontend"}
+        is_backend = bool(normalized & backend_roles)
+        is_frontend = bool(normalized & frontend_roles)
+        return is_backend, is_frontend
+
+    def _plan_requires_backend(self, phases: List[Dict[str, Any]]) -> bool:
+        for phase in phases:
+            owners = self._phase_owners(phase)
+            if self._phase_role_flags(owners)[0]:
+                return True
+        return False
+
+    def _backend_report_path(self, owners: List[str]) -> str:
+        normalized = {self._normalize_role(owner) for owner in owners}
+        if "lead_java" in normalized:
+            return "docs/backend_test_report_java.md"
+        if "lead_python" in normalized:
+            return "docs/backend_test_report_python.md"
+        return "docs/backend_test_report.md"
+
+    @staticmethod
+    def _frontend_report_path() -> str:
+        return "docs/frontend_test_report.md"
+
+    @staticmethod
+    def _report_status(
+        repo_workspace: Path | None,
+        report_path: str,
+        required_sections: List[str],
+    ) -> Dict[str, Any]:
+        status = {"ok": False, "status": "missing", "path": report_path}
+        if not repo_workspace:
+            status["status"] = "no_repo"
+            return status
+        full_path = repo_workspace / report_path
+        if not full_path.exists():
+            return status
+        text = full_path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not text:
+            status["status"] = "empty"
+            return status
+        lowered = text.lower()
+        missing = [section for section in required_sections if section.lower() not in lowered]
+        if missing:
+            status["status"] = "missing_sections"
+            status["missing_sections"] = missing
+            return status
+        status["ok"] = True
+        status["status"] = "ok"
+        return status
+
+    def _handoff_followup_instruction(
+        self,
+        *,
+        feature_request: str,
+        phase_name: str,
+        repo_path: str | None,
+        branch: str | None,
+        report_path: str,
+        kind: str,
+    ) -> str:
+        focus = "backend" if kind == "backend" else "frontend"
+        sections = (
+            "Build, Tests, Run, API Tests" if kind == "backend" else "Screens, Buttons, Flows, UI Tests"
+        )
+        lines = [
+            f"Feature request: {feature_request or 'unspecified'}",
+            f"Phase: {phase_name} ({focus} handoff follow-up)",
+            f"Repo: {repo_path or 'unspecified'}",
+            f"Branch: {branch or 'current'}",
+            "Task:",
+            f"- Update {report_path} with sections for {sections}.",
+            "- Include exact commands and results.",
+            f"- Only edit {report_path}.",
+        ]
         return "\n".join(lines)
 
     def _resolve_role_prompt(self, owners: List[str]) -> str | None:

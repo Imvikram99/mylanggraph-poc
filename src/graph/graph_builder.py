@@ -55,15 +55,25 @@ def _workflow_mode_from_state(state: Dict[str, Any]) -> str:
     plan = state.get("plan") or {}
     metadata = plan.get("metadata") or {}
     context = state.get("context") or {}
-    value = metadata.get("workflow_mode") or context.get("workflow_mode")
+    metadata_mode = metadata.get("workflow_mode")
+    context_mode = context.get("workflow_mode")
+    value = metadata_mode or context_mode
     text = str(value or "").strip().lower()
+    normalized = "planning"
     if text in {"full", "all"}:
-        return "full"
-    if text in {"from_planning", "post_planning", "resume"}:
-        return "from_planning"
+        normalized = "full"
+    if text in {"from_architect", "from-architect", "fromarchitect", "post_architect", "resume_architect"}:
+        normalized = "from_architect"
+    if text in {"from_planning", "from-planning", "fromplanning", "post_planning", "resume"}:
+        normalized = "from_planning"
     if text in {"planning", "planning_only", "plan_only", "architecture_only"}:
-        return "planning"
-    return "planning"
+        normalized = "planning"
+    if os.getenv("WORKFLOW_MODE_DEBUG", "").lower() in {"1", "true", "yes"}:
+        print(
+            "[workflow_mode] "
+            f"metadata={metadata_mode!r} context={context_mode!r} normalized={normalized!r}"
+        )
+    return normalized
 
 
 def build_agent_graph(
@@ -171,17 +181,23 @@ def build_agent_graph(
     graph.add_conditional_edges(
         "workflow_selector",
         lambda state: "planning_resume"
-        if _workflow_mode_from_state(state) == "from_planning"
+        if _workflow_mode_from_state(state) in ("from_planning", "from_architect")
         else "product_owner",
         {"planning_resume": "planning_resume", "product_owner": "product_owner"},
     )
-    graph.add_edge("planning_resume", "plan_reviewer")
+    graph.add_conditional_edges(
+        "planning_resume",
+        lambda state: "lead_planner"
+        if _workflow_mode_from_state(state) == "from_architect"
+        else "plan_reviewer",
+        {"lead_planner": "lead_planner", "plan_reviewer": "plan_reviewer"},
+    )
     graph.add_edge("product_owner", "ui_ux_design")
     graph.add_edge("ui_ux_design", "architecture_planner")
     graph.add_conditional_edges(
         "architecture_planner",
         lambda state: "continue"
-        if _workflow_mode_from_state(state) == "full"
+        if _workflow_mode_from_state(state) in ("full", "from_planning")
         else "stop",
         {"continue": "plan_reviewer", "stop": END},
     )

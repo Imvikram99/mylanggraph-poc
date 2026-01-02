@@ -58,3 +58,7 @@
 {"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","errors":[]}
 {"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","errors":[]}
 {"scenario_id":"feature_request","valid_input":true,"valid_output":false,"route":"workflow","workflow_phase":"architecture","errors":["missing_evaluations"]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":false,"route":"workflow","workflow_phase":"architecture","errors":["missing_evaluations"]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":false,"route":"workflow","workflow_phase":"architecture","errors":["missing_evaluations"]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":false,"route":"workflow","workflow_phase":"architecture","errors":["missing_evaluations"]}
+{"scenario_id":"feature_request","valid_input":true,"valid_output":true,"route":"workflow","workflow_phase":"implementation","errors":[]}

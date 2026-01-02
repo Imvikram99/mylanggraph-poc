@@ -19,6 +19,19 @@ from skills.ops_pack.tools import prepare_repo  # noqa: E402
 app = typer.Typer(help="Scaffold feature-request scenario files or run them directly.")
 
 
+def _normalize_workflow_mode(value: Optional[str]) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"full", "all"}:
+        return "full"
+    if text in {"from_architect", "from-architect", "fromarchitect", "post_architect", "resume_architect"}:
+        return "from_architect"
+    if text in {"from_planning", "from-planning", "fromplanning", "post_planning", "resume"}:
+        return "from_planning"
+    if text in {"planning", "planning_only", "plan_only", "architecture_only"}:
+        return "planning"
+    return "planning"
+
+
 def _build_scenario(
     prompt: str,
     persona: str,
@@ -32,7 +45,7 @@ def _build_scenario(
     workflow_mode: str,
     plan_only: bool = False,
 ) -> dict:
-    workflow_mode = (workflow_mode or "planning").strip().lower()
+    workflow_mode = _normalize_workflow_mode(workflow_mode)
     context = {
         "persona": persona,
         "mode": "architect",
@@ -97,7 +110,7 @@ def create(
     workflow_mode: str = typer.Option(
         "planning",
         "--workflow-mode",
-        help="Workflow mode: planning (default), full, or from_planning.",
+        help="Workflow mode: planning (default), full, from_planning, or from_architect.",
     ),
     output: Path = typer.Option(
         Path("demo/feature_request_generated.yaml"),
@@ -144,7 +157,7 @@ def run_feature(
     workflow_mode: str = typer.Option(
         "planning",
         "--workflow-mode",
-        help="Workflow mode: planning (default), full, or from_planning.",
+        help="Workflow mode: planning (default), full, from_planning, or from_architect.",
     ),
 ):
     """Create and immediately run a feature workflow scenario."""

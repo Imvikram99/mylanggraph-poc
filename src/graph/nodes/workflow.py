@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 from uuid import uuid4
@@ -17,9 +18,36 @@ from skills.lead_pack.tools import choose_stack, risk_matrix
 console = Console()
 
 
+def _workflow_mode_debug_enabled() -> bool:
+    return os.getenv("WORKFLOW_MODE_DEBUG", "").lower() in {"1", "true", "yes"}
+
+
 def _role_output_file(role_config: Dict[str, Any], fallback: str) -> str:
     value = (role_config or {}).get("output_file") or fallback
     return str(value)
+
+
+def _result_ok(result: str | None) -> bool:
+    if not result:
+        return False
+    return "exit=0" in result
+
+
+def _review_file_status(repo_path: str | None, review_file: str) -> tuple[str, str]:
+    if not repo_path:
+        return ("unavailable", review_file)
+    path = Path(review_file)
+    if not path.is_absolute():
+        path = Path(repo_path) / path
+    try:
+        if not path.exists():
+            return ("missing", str(path))
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ("unavailable", str(path))
+    if not text:
+        return ("empty", str(path))
+    return ("ok", str(path))
 
 
 def _select_lead_role(
@@ -259,7 +287,9 @@ def _normalize_workflow_mode(value: Any) -> str:
     text = str(value or "").strip().lower()
     if text in {"full", "all"}:
         return "full"
-    if text in {"from_planning", "post_planning", "resume"}:
+    if text in {"from_architect", "from-architect", "fromarchitect", "post_architect", "resume_architect"}:
+        return "from_architect"
+    if text in {"from_planning", "from-planning", "fromplanning", "post_planning", "resume"}:
         return "from_planning"
     if text in {"planning", "planning_only", "plan_only", "architecture_only"}:
         return "planning"
@@ -337,7 +367,8 @@ class WorkflowSelectorNode:
         plan["request"] = request
         plan.setdefault("metadata", {})
         context = state.get("context", {})
-        workflow_mode = _normalize_workflow_mode(context.get("workflow_mode"))
+        raw_workflow_mode = context.get("workflow_mode")
+        workflow_mode = _normalize_workflow_mode(raw_workflow_mode)
         plan["metadata"].update(
             {
                 "persona": context.get("persona", "architect"),
@@ -351,6 +382,11 @@ class WorkflowSelectorNode:
                 "workflow_mode": workflow_mode,
             }
         )
+        if _workflow_mode_debug_enabled():
+            console.log(
+                "[workflow_mode] WorkflowSelector "
+                f"raw={raw_workflow_mode!r} normalized={workflow_mode!r}"
+            )
         state.setdefault("checkpoints", [])
         state.setdefault("attempt_counters", {})
         state["workflow_phase"] = "intake"
@@ -393,7 +429,7 @@ class ProductOwnerNode:
             f"Enhance the feature request '{request}' in {self.output_file}. "
             "Include user intent, value metric, scenario sketch, and system constraints. "
             "Call out dependencies that architecture and UI/UX must respect. "
-            f"Only edit {self.output_file}."
+            f"Only edit {self.output_file}. Do not edit other files."
         )
         if self.runner == "gemini":
             _dispatch_gemini(plan, "product_owner", instructions, role_prompt=self.role_prompt)
@@ -406,14 +442,34 @@ class ProductOwnerNode:
                 f"Capture feedback in {self.gemini_output_file}. Only edit {self.gemini_output_file}."
             )
             if self.gemini_runner == "gemini":
-                _dispatch_gemini(plan, "product_review", review_instructions, role_prompt=self.gemini_prompt)
+                review_result = _dispatch_gemini(
+                    plan, "product_review", review_instructions, role_prompt=self.gemini_prompt
+                )
             else:
-                _dispatch_codex(plan, "product_review", review_instructions, role_prompt=self.gemini_prompt)
-            update_instructions = (
-                f"Update {self.output_file} using suggestions in {self.gemini_output_file}. "
-                f"Only edit {self.output_file}."
-            )
-            _dispatch_codex(plan, "product_owner_update", update_instructions, role_prompt=self.role_prompt)
+                review_result = _dispatch_codex(
+                    plan, "product_review", review_instructions, role_prompt=self.gemini_prompt
+                )
+            status, review_path = _review_file_status(metadata.get("repo_path"), self.gemini_output_file)
+            metadata.setdefault("gemini_review_status", {})["product_review"] = {
+                "result_ok": _result_ok(review_result),
+                "file_status": status,
+                "file_path": review_path,
+            }
+            if _result_ok(review_result) and status == "ok":
+                update_instructions = (
+                    f"Review {self.output_file} alongside {self.gemini_output_file}. "
+                    "Apply only suggestions that align with the feature scope and current plan. "
+                    "Ignore or defer out-of-scope or conflicting suggestions. "
+                    f"Only edit {self.output_file}. Do not edit other files."
+                )
+                _dispatch_codex(plan, "product_owner_update", update_instructions, role_prompt=self.role_prompt)
+            else:
+                update_instructions = (
+                    f"Gemini review unavailable or empty (status: {status}). Perform a self-review of "
+                    f"{self.output_file} for missing user intent, value metrics, scope risks, or inconsistencies. "
+                    f"Update {self.output_file} accordingly. Only edit {self.output_file}. Do not edit other files."
+                )
+                _dispatch_codex(plan, "product_owner_self_review", update_instructions, role_prompt=self.role_prompt)
         state.setdefault("artifacts", []).append(
             {"type": "product_plan", "request": request, "file": self.output_file}
         )
@@ -450,7 +506,8 @@ class UiUxDesignerNode:
         instructions = (
             f"Design the UX for '{request}' using {product_file} as input. "
             f"Document flows, screens, component mapping, and interaction hints in {self.output_file}. "
-            f"Include responsive considerations and accessibility notes. Only edit {self.output_file}."
+            f"Include responsive considerations and accessibility notes. Only edit {self.output_file}. "
+            "Do not edit other files."
         )
         if self.runner == "gemini":
             _dispatch_gemini(plan, "ui_ux_design", instructions, role_prompt=self.role_prompt)
@@ -463,14 +520,35 @@ class UiUxDesignerNode:
                 f"Capture feedback in {self.gemini_output_file}. Only edit {self.gemini_output_file}."
             )
             if self.gemini_runner == "gemini":
-                _dispatch_gemini(plan, "ui_ux_review", review_instructions, role_prompt=self.gemini_prompt)
+                review_result = _dispatch_gemini(
+                    plan, "ui_ux_review", review_instructions, role_prompt=self.gemini_prompt
+                )
             else:
-                _dispatch_codex(plan, "ui_ux_review", review_instructions, role_prompt=self.gemini_prompt)
-            update_instructions = (
-                f"Update {self.output_file} using suggestions in {self.gemini_output_file}. "
-                f"Only edit {self.output_file}."
-            )
-            _dispatch_codex(plan, "ui_ux_update", update_instructions, role_prompt=self.role_prompt)
+                review_result = _dispatch_codex(
+                    plan, "ui_ux_review", review_instructions, role_prompt=self.gemini_prompt
+                )
+            status, review_path = _review_file_status(metadata.get("repo_path"), self.gemini_output_file)
+            metadata.setdefault("gemini_review_status", {})["ui_ux_review"] = {
+                "result_ok": _result_ok(review_result),
+                "file_status": status,
+                "file_path": review_path,
+            }
+            if _result_ok(review_result) and status == "ok":
+                update_instructions = (
+                    f"Review {self.output_file} alongside {self.gemini_output_file}. "
+                    "Apply only UX/UI suggestions that align with the feature scope and current plan. "
+                    "Ignore or defer out-of-scope or conflicting suggestions. "
+                    f"Only edit {self.output_file}. Do not edit other files."
+                )
+                _dispatch_codex(plan, "ui_ux_update", update_instructions, role_prompt=self.role_prompt)
+            else:
+                update_instructions = (
+                    f"Gemini review unavailable or empty (status: {status}). Perform a self-review of "
+                    f"{self.output_file} for usability gaps, missing states, accessibility issues, or flow "
+                    "inconsistencies. Update the plan accordingly. "
+                    f"Only edit {self.output_file}. Do not edit other files."
+                )
+                _dispatch_codex(plan, "ui_ux_self_review", update_instructions, role_prompt=self.role_prompt)
         state.setdefault("artifacts", []).append(
             {"type": "ui_ux_plan", "request": request, "file": self.output_file}
         )
@@ -491,6 +569,7 @@ class ArchitecturePlannerNode:
         self.success_metric = self.config.get("success_metric", "")
         self.role_prompt = self.config.get("prompt")
         self.output_file = _role_output_file(self.config, "docs/architecture_plan.md")
+        self.api_output_file = self.config.get("api_output_file") or "docs/api_spec.md"
         self.runner = (self.config.get("runner") or "codex").lower()
         self.gemini_config = roles.get("gemini_arch_reviewer", {})
         self.gemini_prompt = self.gemini_config.get("prompt")
@@ -512,13 +591,15 @@ class ArchitecturePlannerNode:
         scenario_id = context.get("scenario_id", "feature_request")
         scenario_file = context.get("scenario_file") or f"demo/{scenario_id}.yaml"
         metadata["architecture_file"] = self.output_file
+        metadata["api_spec_file"] = self.api_output_file
         instructions = (
             f"Create or update {self.output_file} with the architecture vision, system changes, guardrails, "
-            f"success metrics, API design, and key risks for '{request}'. Reference persona '{persona}' and "
-            f"stack '{stack}'. Incorporate inputs from {product_file} and {ui_ux_file}. Include links to "
-            f"relevant knowledge-base files and include acceptance tests referencing {scenario_file}. "
-            "Ensure the document is well structured. "
-            f"Only edit {self.output_file}."
+            f"success metrics, and key risks for '{request}'. Reference persona '{persona}' and stack "
+            f"'{stack}'. Incorporate inputs from {product_file} and {ui_ux_file}. Include links to relevant "
+            f"knowledge-base files and include acceptance tests referencing {scenario_file}. "
+            f"Design the API contract in {self.api_output_file} with endpoints, payloads, status codes, "
+            "auth rules, and versioning. "
+            f"Only edit {self.output_file} and {self.api_output_file}. Do not edit other files."
         )
         if self.runner == "gemini":
             _dispatch_gemini(plan, "architecture_planning", instructions, role_prompt=self.role_prompt)
@@ -531,14 +612,37 @@ class ArchitecturePlannerNode:
                 f"Capture feedback in {self.gemini_output_file}. Only edit {self.gemini_output_file}."
             )
             if self.gemini_runner == "gemini":
-                _dispatch_gemini(plan, "architecture_review", review_instructions, role_prompt=self.gemini_prompt)
+                review_result = _dispatch_gemini(
+                    plan, "architecture_review", review_instructions, role_prompt=self.gemini_prompt
+                )
             else:
-                _dispatch_codex(plan, "architecture_review", review_instructions, role_prompt=self.gemini_prompt)
-            update_instructions = (
-                f"Update {self.output_file} using suggestions in {self.gemini_output_file}. "
-                f"Only edit {self.output_file}."
-            )
-            _dispatch_codex(plan, "architecture_update", update_instructions, role_prompt=self.role_prompt)
+                review_result = _dispatch_codex(
+                    plan, "architecture_review", review_instructions, role_prompt=self.gemini_prompt
+                )
+            status, review_path = _review_file_status(metadata.get("repo_path"), self.gemini_output_file)
+            metadata.setdefault("gemini_review_status", {})["architecture_review"] = {
+                "result_ok": _result_ok(review_result),
+                "file_status": status,
+                "file_path": review_path,
+            }
+            if _result_ok(review_result) and status == "ok":
+                update_instructions = (
+                    f"Review {self.output_file} alongside {self.gemini_output_file}. "
+                    "Apply only suggestions that align with the documented scope, dependencies, and API design. "
+                    "Ignore or defer out-of-scope or conflicting suggestions. "
+                    f"Only edit {self.output_file} and {self.api_output_file}. Do not edit other files."
+                )
+                _dispatch_codex(plan, "architecture_update", update_instructions, role_prompt=self.role_prompt)
+            else:
+                update_instructions = (
+                    f"Gemini review unavailable or empty (status: {status}). Perform a self-review of "
+                    f"{self.output_file} for scalability gaps, telemetry coverage, API risks, and dependency "
+                    "issues. Update the plan accordingly. "
+                    f"Only edit {self.output_file} and {self.api_output_file}. Do not edit other files."
+                )
+                _dispatch_codex(
+                    plan, "architecture_self_review", update_instructions, role_prompt=self.role_prompt
+                )
         summary_sections: List[Dict[str, str]] = []
         for section in self.sections:
             text = section.get("template", "").format(request=request, persona=persona, stack=stack)
@@ -595,6 +699,7 @@ class PlanningResumeNode:
         self.product_file = _role_output_file(roles.get("product_owner", {}), "docs/product_plan.md")
         self.ui_ux_file = _role_output_file(roles.get("ui_ux_designer", {}), "docs/ui_ux_plan.md")
         self.architecture_file = _role_output_file(roles.get("architect", {}), "docs/architecture_plan.md")
+        self.api_spec_file = roles.get("architect", {}).get("api_output_file") or "docs/api_spec.md"
 
     def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         plan = state.setdefault("plan", {})
@@ -602,6 +707,9 @@ class PlanningResumeNode:
         metadata.setdefault("product_file", self.product_file)
         metadata.setdefault("ui_ux_file", self.ui_ux_file)
         metadata.setdefault("architecture_file", self.architecture_file)
+        metadata.setdefault("api_spec_file", self.api_spec_file)
+        raw_workflow_mode = metadata.get("workflow_mode")
+        workflow_mode = _normalize_workflow_mode(raw_workflow_mode)
         architecture = plan.setdefault("architecture", {})
 
         path = Path(self.architecture_file)
@@ -630,6 +738,18 @@ class PlanningResumeNode:
         state.setdefault("checkpoints", []).append(
             {"phase": "planning_resume", "file": self.architecture_file}
         )
+        if workflow_mode == "from_architect" and not plan.get("review"):
+            plan["review"] = {
+                "status": "approved",
+                "skipped": True,
+                "reason": "from_architect resumes after finalized architecture",
+            }
+        if _workflow_mode_debug_enabled():
+            console.log(
+                "[workflow_mode] PlanningResume "
+                f"raw={raw_workflow_mode!r} normalized={workflow_mode!r} "
+                f"review_present={bool(plan.get('review'))}"
+            )
         append_message(state, "assistant", "Planning resume initialized.", name="planning_resume")
         console.log("[magenta]PlanningResume[/] seeded planning metadata")
         return state
@@ -690,6 +810,7 @@ class PlanReviewerNode:
         attempt_counters = state.setdefault("attempt_counters", {})
         phase_review = plan.get("phase_review") or {}
         metadata = plan.setdefault("metadata", {})
+        workflow_mode = _normalize_workflow_mode(metadata.get("workflow_mode"))
         metadata["review_file"] = self.output_file
         implementation_file = metadata.get("implementation_file") or "docs/implementation.md"
         architecture_file = metadata.get("architecture_file") or "docs/architecture_plan.md"
@@ -738,6 +859,31 @@ class PlanReviewerNode:
 
         attempt_counters["plan_review"] = attempt_counters.get("plan_review", 0) + 1
         if missing:
+            if workflow_mode == "from_planning":
+                plan["review"] = {
+                    "status": "approved",
+                    "checklist": self.checklist,
+                    "attempts": attempt_counters["plan_review"],
+                    "skipped_architecture_revision": True,
+                    "issues": missing,
+                }
+                state["workflow_phase"] = "review_approved"
+                _dispatch_codex(
+                    plan,
+                    "architecture_review",
+                    f"Record reviewer notes in {self.output_file} noting missing items "
+                    f"({', '.join(missing)}) and that from_planning skips architecture updates. "
+                    "Only edit the review notes file.",
+                    role_prompt=self.role_prompt,
+                )
+                feedback = (
+                    "Reviewer flagged missing items, but from_planning skips architecture updates; "
+                    "proceeding with existing plan."
+                )
+                plan.setdefault("review_feedback", []).append(feedback)
+                append_message(state, "assistant", feedback, name="plan_reviewer")
+                console.log("[yellow]PlanReviewer[/] recorded missing items; proceeding in from_planning")
+                return state
             plan["review"] = {
                 "status": "needs_revision",
                 "issues": missing,
@@ -783,6 +929,11 @@ class PlanReviewerNode:
             return "phase_revision"
         review = plan.get("review") or {}
         if review.get("status") == "needs_revision":
+            workflow_mode = _normalize_workflow_mode(
+                (plan.get("metadata") or {}).get("workflow_mode")
+            )
+            if workflow_mode == "from_planning":
+                return "approved"
             return "architecture_revision"
         return "approved"
 
@@ -812,14 +963,15 @@ class LeadPlannerNode:
         product_file = metadata.get("product_file") or "docs/product_plan.md"
         ui_ux_file = metadata.get("ui_ux_file") or "docs/ui_ux_plan.md"
         architecture_file = metadata.get("architecture_file") or "docs/architecture_plan.md"
+        api_spec_file = metadata.get("api_spec_file") or "docs/api_spec.md"
         review_file = metadata.get("review_file") or "docs/review_notes.md"
         focus = lead_config.get("focus") or []
         focus_text = "; ".join(str(item) for item in focus if str(item).strip())
         instructions = (
             f"Create a lead plan for '{request}' in {output_file}. "
-            f"Use {product_file}, {ui_ux_file}, {architecture_file}, and {review_file}. "
+            f"Use {product_file}, {ui_ux_file}, {architecture_file}, {api_spec_file}, and {review_file}. "
             f"Focus areas: {focus_text or 'prioritize domain-specific risks and tests'}. "
-            f"Only edit {output_file}."
+            f"Only edit {output_file}. Do not edit other files."
         )
         _dispatch_codex(plan, f"{role_key}_planning", instructions, role_prompt=role_prompt)
         plan["lead"] = {"role": role_key, "file": output_file, "focus": focus}
@@ -854,6 +1006,7 @@ class TechLeadNode:
         product_file = metadata.get("product_file") or "docs/product_plan.md"
         ui_ux_file = metadata.get("ui_ux_file") or "docs/ui_ux_plan.md"
         architecture_file = metadata.get("architecture_file") or "docs/architecture_plan.md"
+        api_spec_file = metadata.get("api_spec_file") or "docs/api_spec.md"
         review_file = metadata.get("review_file") or "docs/review_notes.md"
         lead_file = metadata.get("lead_file") or "docs/lead_plan.md"
         _dispatch_codex(
@@ -861,8 +1014,9 @@ class TechLeadNode:
             "tech_lead_planning",
             f"Produce the Tech Lead plan for this feature in {self.output_file} including stack recommendations, "
             "dependencies, guardrails, and a numbered list of phases with focus areas. Reference "
-            f"{product_file}, {ui_ux_file}, {architecture_file}, {lead_file}, and {review_file}. "
-            f"Only edit {self.output_file}.",
+            f"{product_file}, {ui_ux_file}, {architecture_file}, {api_spec_file}, {lead_file}, "
+            f"and {review_file}. "
+            f"Only edit {self.output_file}. Do not edit other files.",
             role_prompt=self.role_prompt,
         )
 
@@ -957,15 +1111,21 @@ class ImplementationPlannerNode:
         scenario_id = context.get("scenario_id", "feature_request")
         scenario_file = context.get("scenario_file") or f"demo/{scenario_id}.yaml"
         owners = context.get("phase_owners") or {}
+        lead_role = metadata.get("lead_role")
+        lead_role_key = str(lead_role or "").strip().lower()
+
+        phase_specs = self._build_phase_specs(request, persona, lead_role_key)
+        if not phase_specs:
+            phase_specs = self.default_phases
 
         phases: List[Dict[str, Any]] = []
-        for idx, base in enumerate(self.default_phases, start=1):
+        for idx, base in enumerate(phase_specs, start=1):
             name = base["name"]
-            owner = owners.get(name)
+            owner = owners.get(name) or base.get("owner")
             if not owner:
                 owner = persona if idx == 1 else ("tech_lead" if idx == 2 else "ops")
             deliverables = [
-                base["focus"].format(request=request),
+                base.get("focus", "").format(request=request),
                 template_sections["template"],
                 template_sections["dependencies"],
             ]
@@ -1003,6 +1163,35 @@ class ImplementationPlannerNode:
         append_message(state, "assistant", summary, name="implementation_planner")
         console.log(f"[cyan]ImplementationPlanner[/] generated {len(phases)} phases for '{request}'")
         return state
+
+    @staticmethod
+    def _build_phase_specs(request: str, persona: str, lead_role: str) -> List[Dict[str, str]]:
+        if lead_role in {"lead_java", "lead_python"}:
+            return [
+                {"name": "Design Hardening", "owner": persona, "focus": "Finalize architecture + docs for {request}."},
+                {
+                    "name": "Backend Implementation",
+                    "owner": lead_role,
+                    "focus": "Implement backend APIs for {request} using docs/api_spec.md and capture test evidence.",
+                },
+                {
+                    "name": "Frontend Implementation",
+                    "owner": "lead_react",
+                    "focus": "Implement UI flows for {request} based on docs/ui_ux_plan.md and API specs.",
+                },
+                {"name": "Validation", "owner": "ops", "focus": "Run demo scenarios + tests proving {request} works."},
+            ]
+        if lead_role == "lead_react":
+            return [
+                {"name": "Design Hardening", "owner": persona, "focus": "Finalize architecture + docs for {request}."},
+                {
+                    "name": "Frontend Implementation",
+                    "owner": "lead_react",
+                    "focus": "Implement UI flows for {request} based on docs/ui_ux_plan.md and API specs.",
+                },
+                {"name": "Validation", "owner": "ops", "focus": "Run demo scenarios + tests proving {request} works."},
+            ]
+        return []
 
     def _load_template_sections(self) -> Dict[str, str]:
         if not self.template_path.exists():

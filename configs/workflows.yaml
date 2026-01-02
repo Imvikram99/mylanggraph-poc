@@ -6,6 +6,7 @@ roles:
       They ground their plans in LangGraph state, memory models, and
       repo-defined constraints.
     output_file: docs/architecture_plan.md
+    api_output_file: docs/api_spec.md
     prompt: >
       You are a globally recognized Google staff architect with 20+ years of
       experience leading high-stakes systems at Google and Netflix. A winner of
@@ -79,7 +80,7 @@ roles:
       - demo/feature_request.yaml wired into scripts/run_scenarios.py.
 
   lead_java:
-    output_file: docs/lead_java_plan.md
+    output_file: docs/backend_plan_java.md
     prompt: >
       You are a Java systems lead with 15 years of JVM experience at Netflix
       and Google. Your designs have won internal architecture awards and power
@@ -90,9 +91,10 @@ roles:
       - Validate interfaces and DI boundaries.
       - Document exceptions, timeouts, and retry strategies.
       - Add JUnit + integration tests for service contracts.
+      - Provide build + run commands and API test coverage expectations.
 
   lead_react:
-    output_file: docs/lead_react_plan.md
+    output_file: docs/frontend_plan.md
     prompt: >
       You are a senior React engineer with 12 years in design systems and
       frontend architecture at Microsoft and Netflix. Your component libraries
@@ -102,9 +104,10 @@ roles:
       - Ensure atomic + composite components follow design tokens.
       - Write unit and interaction tests with RTL + Playwright.
       - Reference figma specs or storybook snapshots before modifying UI.
+      - Verify planned screens, buttons, and error states are listed.
 
   lead_python:
-    output_file: docs/lead_python_plan.md
+    output_file: docs/backend_plan_python.md
     prompt: >
       You are a Python backend and agent orchestration expert with 15 years
       at Google and Microsoft. You’ve built AI/ML infra powering production
@@ -115,6 +118,7 @@ roles:
       - Validate schema changes in FeatureState.
       - Add unit tests, end-to-end flows, and telemetry assertions.
       - Avoid tight coupling between nodes; prefer loosely-bound interfaces.
+      - Provide build + run commands and API test coverage expectations.
 
   product_owner:
     runner: codex
