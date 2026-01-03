@@ -119,15 +119,22 @@ def _dispatch_codex(
         session_name=session["name"],
         phase=phase,
     )
-    metadata.setdefault("codex_requests", []).append(
+    metadata.setdefault("tool_requests", []).append(
         {
             "phase": phase,
             "session_id": session["id"],
             "session_name": session["name"],
             "instruction": payload,
+            "tool": "codex",
         }
     )
-    metadata.setdefault("codex_logs", {})[phase] = result
+    metadata.setdefault("tool_logs", []).append(
+        {
+            "phase": phase,
+            "result": result,
+            "tool": "codex",
+        }
+    )
     return result
 
 
@@ -171,15 +178,22 @@ def _dispatch_gemini(
         session_name=session["name"],
         phase=phase,
     )
-    metadata.setdefault("gemini_requests", []).append(
+    metadata.setdefault("tool_requests", []).append(
         {
             "phase": phase,
             "session_id": session["id"],
             "session_name": session["name"],
             "instruction": payload,
+            "tool": "gemini",
         }
     )
-    metadata.setdefault("gemini_logs", {})[phase] = result
+    metadata.setdefault("tool_logs", []).append(
+        {
+            "phase": phase,
+            "result": result,
+            "tool": "gemini",
+        }
+    )
     return result
 
 
@@ -238,7 +252,14 @@ def _maybe_init_codex_session(
         phase=phase,
     )
     session_inits[phase] = {"session_id": session["id"], "result": init_result}
-    metadata.setdefault("codex_logs", {})[f"{phase}_init"] = init_result
+    metadata.setdefault("tool_logs", []).append(
+        {
+            "phase": phase,
+            "result": init_result,
+            "tool": "codex",
+            "kind": "session_init",
+        }
+    )
 
 
 def _maybe_init_gemini_session(
@@ -272,7 +293,14 @@ def _maybe_init_gemini_session(
         phase=phase,
     )
     session_inits[phase] = {"session_id": session["id"], "result": init_result}
-    metadata.setdefault("gemini_logs", {})[f"{phase}_init"] = init_result
+    metadata.setdefault("tool_logs", []).append(
+        {
+            "phase": phase,
+            "result": init_result,
+            "tool": "gemini",
+            "kind": "session_init",
+        }
+    )
 
 
 def _coerce_list(value: Any) -> List[str]:

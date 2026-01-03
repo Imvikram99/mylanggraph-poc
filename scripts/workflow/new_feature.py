@@ -46,6 +46,10 @@ def _build_scenario(
     feature: Optional[str],
     workflow_mode: str,
     plan_only: bool = False,
+    force_rerun: bool = False,
+    coding_tool: str = "codex",
+    review_tool: str = "gemini",
+    fallback_review_tool: str = "codex",
 ) -> dict:
     workflow_mode = _normalize_workflow_mode(workflow_mode)
     context = {
@@ -54,6 +58,10 @@ def _build_scenario(
         "stack": stack,
         "scenario_id": scenario_id,
         "workflow_mode": workflow_mode,
+        "force_rerun": force_rerun,
+        "coding_tool": coding_tool,
+        "review_tool": review_tool,
+        "fallback_review_tool": fallback_review_tool,
     }
     if deadline:
         context["deadline"] = deadline
@@ -121,6 +129,19 @@ def create(
         help="Path where the scenario YAML will be written.",
     ),
     plan_only: bool = typer.Option(False, "--plan-only", help="Embed plan-only mode in the scenario."),
+    coding_tool: str = typer.Option(
+        "codex", "--coding-tool", help="Primary coding tool to use: 'codex' (default) or 'gemini'."
+    ),
+    review_tool: str = typer.Option(
+        "gemini",
+        "--review-tool",
+        help="Tool used to distill lessons: 'gemini', 'codex', or 'local'.",
+    ),
+    fallback_review_tool: str = typer.Option(
+        "codex",
+        "--fallback-review-tool",
+        help="Fallback review tool when review-tool fails.",
+    ),
 ):
     """Create a scenario YAML with the workflow context pre-populated."""
     scenario = _build_scenario(
@@ -135,6 +156,9 @@ def create(
         feature,
         workflow_mode,
         plan_only,
+        coding_tool=coding_tool,
+        review_tool=review_tool,
+        fallback_review_tool=fallback_review_tool,
     )
     _write_scenario(scenario, output)
     typer.secho(f"Scenario written to {output}", fg=typer.colors.GREEN)
@@ -161,6 +185,20 @@ def run_feature(
         "--workflow-mode",
         help="Workflow mode: planning (default), full, from_planning, from_architect, or debugandverify.",
     ),
+    force_rerun: bool = typer.Option(False, "--force-rerun", help="Force rerun ignoring checkpoints."),
+    coding_tool: str = typer.Option(
+        "codex", "--coding-tool", help="Primary coding tool to use: 'codex' (default) or 'gemini'."
+    ),
+    review_tool: str = typer.Option(
+        "gemini",
+        "--review-tool",
+        help="Tool used to distill lessons: 'gemini', 'codex', or 'local'.",
+    ),
+    fallback_review_tool: str = typer.Option(
+        "codex",
+        "--fallback-review-tool",
+        help="Fallback review tool when review-tool fails.",
+    ),
 ):
     """Create and immediately run a feature workflow scenario."""
     scenario = _build_scenario(
@@ -175,6 +213,10 @@ def run_feature(
         feature,
         workflow_mode,
         plan_only,
+        force_rerun,
+        coding_tool,
+        review_tool,
+        fallback_review_tool,
     )
     if save:
         _write_scenario(scenario, save)

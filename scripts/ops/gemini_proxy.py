@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from shlex import split
@@ -134,10 +135,69 @@ def _format_instruction(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _log_path_allowed(path: Path) -> bool:
+    allowlist = os.getenv("GEMINI_PROXY_LOG_ALLOWLIST", "").strip()
+    roots = []
+    if allowlist:
+        roots = [Path(entry).expanduser().resolve() for entry in allowlist.split(",") if entry.strip()]
+    else:
+        roots = [
+            Path(tempfile.gettempdir()).resolve(),
+            Path("/tmp").resolve(),
+            Path("/var/tmp").resolve(),
+            Path("/var/folders").resolve(),
+        ]
+    for root in roots:
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _read_log_excerpt(path_str: str, *, max_bytes: int) -> tuple[str | None, str | None, str | None, int | None]:
+    try:
+        path = Path(path_str).expanduser()
+        resolved = path.resolve()
+    except OSError:
+        return (path_str, None, "resolve_failed", None)
+    if not _log_path_allowed(resolved):
+        return (str(resolved), None, "outside_allowlist", None)
+    if not resolved.exists():
+        return (str(resolved), None, "missing", None)
+    if not resolved.is_file():
+        return (str(resolved), None, "not_file", None)
+    size = resolved.stat().st_size
+    with resolved.open("rb") as handle:
+        data = handle.read(max_bytes)
+    text = data.decode("utf-8", errors="replace").strip()
+    note = f"truncated_to_{max_bytes}b" if size > max_bytes else None
+    return (str(resolved), text, note, size)
+
+
 def _summarize_process(proc: subprocess.CompletedProcess) -> str:
     parts = [f"exit={proc.returncode}"]
     stdout = (proc.stdout or "").strip()
     stderr = (proc.stderr or "").strip()
+
+    # Attempt to read external error log if referenced in stderr
+    if "Full report available at: " in stderr:
+        try:
+            path_str = stderr.split("Full report available at: ")[-1].strip().split()[0].rstrip(".")
+            max_bytes = int(os.getenv("GEMINI_PROXY_LOG_BYTES", "2048"))
+            log_path, content, note, size = _read_log_excerpt(path_str, max_bytes=max_bytes)
+            if log_path:
+                parts.append(f"log_file={log_path}")
+            if size is not None:
+                parts.append(f"log_size={size}")
+            if note:
+                parts.append(f"log_note={note}")
+            if content:
+                parts.append(f"log_content={content.replace(chr(10), '\\\\n')}")
+        except Exception:
+            pass  # Fail gracefully if parsing/reading fails
+
     if stdout:
         parts.append(f"stdout={stdout[:160]}")
     if stderr:

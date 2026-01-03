@@ -122,6 +122,13 @@ def _maybe_resume_state(
     resume_enabled = os.getenv("WORKFLOW_RESUME", "true").lower() not in {"0", "false", "no"}
     if not resume_enabled:
         return state, False
+        
+    # Check for forced rerun in context
+    force_rerun = (scenario_input.context or {}).get("force_rerun", False)
+    if force_rerun:
+        console.log("[yellow]Forcing rerun (ignoring checkpoints)[/]")
+        return state, False
+
     if not getattr(graph, "checkpointer", None):
         return state, False
     try:

@@ -107,7 +107,7 @@ def build_agent_graph(
     memory_write = MemoryWriteNode(memory_store)
     summarizer = ConversationSummaryNode()
     evaluator = EvaluatorNode()
-    langchain_agent = LangChainAgentNode(workflow_config)
+    langchain_agent = LangChainAgentNode(workflow_config, memory_store=memory_store)
     workflow_selector = WorkflowSelectorNode(workflow_config)
     planning_resume = PlanningResumeNode(workflow_config)
     product_owner = ProductOwnerNode(workflow_config)

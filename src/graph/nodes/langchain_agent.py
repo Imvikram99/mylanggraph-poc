@@ -17,6 +17,7 @@ from skills.ops_pack.tools import (
     run_repo_command,
     run_sandboxed,
 )
+from ...memory.temporal import MemoryRecord, TemporalMemoryStore
 from ...observability.command_runs import extract_report_commands, load_command_hints, log_report_commands
 
 try:  # pragma: no cover - optional dependency components
@@ -34,8 +35,9 @@ console = Console()
 class LangChainAgentNode:
     """Demonstrate LangChain AgentExecutor embedded inside LangGraph."""
 
-    def __init__(self, workflow_config: Dict[str, Any] | None = None) -> None:
+    def __init__(self, workflow_config: Dict[str, Any] | None = None, memory_store: TemporalMemoryStore | None = None) -> None:
         self.role_prompts = self._load_role_prompts(workflow_config)
+        self.memory_store = memory_store
         self.available = AgentType is not None and FakeListLLM is not None and Tool is not None and initialize_agent
         if self.available:
             self.agent = self._build_agent()
@@ -112,7 +114,9 @@ class LangChainAgentNode:
             phase_exec["repo_prep"] = prep_log
         if repo_workspace:
             phase_exec["repo_path"] = str(repo_workspace)
-        repo_branch = state.get("context", {}).get("target_branch")
+        repo_branch = context.get("target_branch")
+        coding_tool = context.get("coding_tool", "codex")
+        review_tool, fallback_review_tool = self._resolve_review_tools(context)
         repo_ref = str(repo_workspace) if repo_workspace else None
         plan_request = (state.get("plan") or {}).get("request", "")
         for idx, phase in enumerate(phases, start=1):
@@ -169,6 +173,7 @@ class LangChainAgentNode:
                 role_prompt,
                 repo_path=repo_ref,
                 branch=repo_branch,
+                coding_tool=coding_tool,
             )
             instruction = self._format_phase_instruction(
                 idx,
@@ -185,7 +190,7 @@ class LangChainAgentNode:
                         f"{instruction}\n\nKnown build/test fixes from prior runs:\n"
                         + "\n".join(f"- {hint}" for hint in hints)
                     )
-            codex_result = self._invoke_codex(
+            codex_result = self._invoke_coding_tool(
                 phase_idx=idx,
                 phase=phase,
                 feature_request=plan_request,
@@ -195,13 +200,15 @@ class LangChainAgentNode:
                 session_name=session["name"],
                 phase_name=phase_name,
                 instruction=instruction,
+                coding_tool=coding_tool,
             )
-            metadata.setdefault("codex_requests", []).append(
+            metadata.setdefault("tool_requests", []).append(
                 {
                     "phase": phase_name,
                     "session_id": session["id"],
                     "session_name": session["name"],
                     "instruction": instruction,
+                    "tool": coding_tool,
                 }
             )
             handoff_report = None
@@ -219,7 +226,7 @@ class LangChainAgentNode:
                         report_path=report_path,
                         kind="backend",
                     )
-                    followup_result = self._invoke_codex(
+                    followup_result = self._invoke_coding_tool(
                         phase_idx=idx,
                         phase=phase,
                         feature_request=plan_request,
@@ -229,20 +236,23 @@ class LangChainAgentNode:
                         session_name=session["name"],
                         phase_name=f"{phase_name} (handoff)",
                         instruction=followup_instruction,
+                        coding_tool=coding_tool,
                     )
-                    metadata.setdefault("codex_requests", []).append(
+                    metadata.setdefault("tool_requests", []).append(
                         {
                             "phase": f"{phase_name} (handoff)",
                             "session_id": session["id"],
                             "session_name": session["name"],
                             "instruction": followup_instruction,
+                            "tool": coding_tool,
                         }
                     )
-                    phase_exec.setdefault("codex_calls", []).append(
+                    phase_exec.setdefault("tool_calls", []).append(
                         {
                             "phase": f"{phase_name} (handoff)",
                             "result": followup_result,
                             "session_id": session["id"],
+                            "tool": coding_tool,
                         }
                     )
                     handoff_report = self._report_status(repo_workspace, report_path, required_sections)
@@ -262,7 +272,7 @@ class LangChainAgentNode:
                         report_path=report_path,
                         kind="frontend",
                     )
-                    followup_result = self._invoke_codex(
+                    followup_result = self._invoke_coding_tool(
                         phase_idx=idx,
                         phase=phase,
                         feature_request=plan_request,
@@ -272,20 +282,23 @@ class LangChainAgentNode:
                         session_name=session["name"],
                         phase_name=f"{phase_name} (handoff)",
                         instruction=followup_instruction,
+                        coding_tool=coding_tool,
                     )
-                    metadata.setdefault("codex_requests", []).append(
+                    metadata.setdefault("tool_requests", []).append(
                         {
                             "phase": f"{phase_name} (handoff)",
                             "session_id": session["id"],
                             "session_name": session["name"],
                             "instruction": followup_instruction,
+                            "tool": coding_tool,
                         }
                     )
-                    phase_exec.setdefault("codex_calls", []).append(
+                    phase_exec.setdefault("tool_calls", []).append(
                         {
                             "phase": f"{phase_name} (handoff)",
                             "result": followup_result,
                             "session_id": session["id"],
+                            "tool": coding_tool,
                         }
                     )
                     handoff_report = self._report_status(repo_workspace, report_path, required_sections)
@@ -321,6 +334,7 @@ class LangChainAgentNode:
             gemini_result = None
             gemini_followup_result = None
             if test_policy == "debugger" and not phase_success:
+                original_failures = report_failures
                 gemini_attempts = phase_exec.setdefault("gemini_attempts", {})
                 if gemini_attempts.get(phase_name, 0) < 1:
                     gemini_attempts[phase_name] = gemini_attempts.get(phase_name, 0) + 1
@@ -367,7 +381,7 @@ class LangChainAgentNode:
                         suggestion_file=suggestion_file,
                         report_paths=report_paths,
                     )
-                    gemini_followup_result = self._invoke_codex(
+                    gemini_followup_result = self._invoke_coding_tool(
                         phase_idx=idx,
                         phase=phase,
                         feature_request=plan_request,
@@ -377,20 +391,23 @@ class LangChainAgentNode:
                         session_name=session["name"],
                         phase_name=f"{phase_name} (gemini follow-up)",
                         instruction=followup_instruction,
+                        coding_tool=coding_tool,
                     )
-                    metadata.setdefault("codex_requests", []).append(
+                    metadata.setdefault("tool_requests", []).append(
                         {
                             "phase": f"{phase_name} (gemini follow-up)",
                             "session_id": session["id"],
                             "session_name": session["name"],
                             "instruction": followup_instruction,
+                            "tool": coding_tool,
                         }
                     )
-                    phase_exec.setdefault("codex_calls", []).append(
+                    phase_exec.setdefault("tool_calls", []).append(
                         {
                             "phase": f"{phase_name} (gemini follow-up)",
                             "result": gemini_followup_result,
                             "session_id": session["id"],
+                            "tool": coding_tool,
                         }
                     )
                     if repo_workspace and repo_ref and report_paths:
@@ -414,6 +431,32 @@ class LangChainAgentNode:
                     phase_success = self._codex_success(gemini_followup_result)
                     if report_paths:
                         phase_success = not report_failures
+                    if phase_success and self.memory_store:
+                        fix_summary = gemini_followup_result or followup_result or codex_result or ""
+                        lesson = self._distill_lesson(
+                            phase_name,
+                            original_failures,
+                            fix_summary,
+                            review_tool=review_tool,
+                            fallback_review_tool=fallback_review_tool,
+                            repo_path=repo_ref,
+                            branch=repo_branch,
+                        )
+                        if lesson:
+                            self.memory_store.write(
+                                MemoryRecord(
+                                    text=lesson,
+                                    category="golden_rule",
+                                    importance=1.0,
+                                    metadata={
+                                        "phase": phase_name,
+                                        "repo": repo_ref,
+                                        "review_tool": review_tool,
+                                        "fallback_review_tool": fallback_review_tool,
+                                    },
+                                )
+                            )
+                            console.log(f"[green]Scribe learned[/] {lesson}")
             phase_statuses[phase_name] = "completed" if phase_success else "failed"
             summary_lines = [
                 f"Phase {idx} – {phase_name}",
@@ -429,7 +472,7 @@ class LangChainAgentNode:
                 summary_lines.append(f"Repo command: {repo_cmd}")
             else:
                 summary_lines.append(f"Sandbox: {repo_cmd}")
-            summary_lines.append(f"Codex CLI: {codex_result}")
+            summary_lines.append(f"Codex CLI ({coding_tool}): {codex_result}")
             if handoff_report:
                 summary_lines.append(
                     f"Handoff report: {handoff_report['path']} ({handoff_report['status']})"
@@ -438,11 +481,11 @@ class LangChainAgentNode:
                 if missing:
                     summary_lines.append(f"Handoff report missing: {', '.join(missing)}")
             if followup_result:
-                summary_lines.append(f"Codex CLI (handoff follow-up): {followup_result}")
+                summary_lines.append(f"Codex CLI ({coding_tool} handoff follow-up): {followup_result}")
             if gemini_result:
                 summary_lines.append(f"Gemini CLI: {gemini_result}")
             if gemini_followup_result:
-                summary_lines.append(f"Codex CLI (gemini follow-up): {gemini_followup_result}")
+                summary_lines.append(f"Codex CLI ({coding_tool} gemini follow-up): {gemini_followup_result}")
             phase_output = "\n".join(summary_lines)
             phase_outputs.append(phase_output)
             checkpoints.append(
@@ -452,8 +495,13 @@ class LangChainAgentNode:
                     "status": "completed" if phase_success else "failed",
                 }
             )
-            phase_exec.setdefault("codex_calls", []).append(
-                {"phase": phase_name, "result": codex_result, "session_id": session["id"]}
+            phase_exec.setdefault("tool_calls", []).append(
+                {
+                    "phase": phase_name,
+                    "result": codex_result,
+                    "session_id": session["id"],
+                    "tool": coding_tool,
+                }
             )
         output = "\n\n".join(phase_outputs)
         phase_exec["count"] = len(phases)
@@ -483,6 +531,114 @@ class LangChainAgentNode:
             verbose=False,
         )
 
+    @staticmethod
+    def _normalize_review_tool(value: Any, default: str) -> str:
+        tool = str(value or default).strip().lower()
+        if tool in {"", "none", "off", "false"}:
+            return ""
+        if tool not in {"gemini", "codex", "local"}:
+            return default
+        return tool
+
+    @classmethod
+    def _resolve_review_tools(cls, context: Dict[str, Any]) -> tuple[str, str]:
+        review_tool = cls._normalize_review_tool(context.get("review_tool"), "gemini")
+        fallback_tool = cls._normalize_review_tool(context.get("fallback_review_tool"), "codex")
+        if fallback_tool == review_tool:
+            fallback_tool = ""
+        return review_tool, fallback_tool
+
+    @staticmethod
+    def _review_result_ok(result: str | None) -> bool:
+        if not result:
+            return False
+        lowered = result.lower()
+        if "exit=" in lowered:
+            return "exit=0" in lowered and "timed out" not in lowered and "error" not in lowered
+        return True
+
+    @staticmethod
+    def _extract_golden_rule(text: str) -> str:
+        marker = "Golden Rule:"
+        idx = text.find(marker)
+        if idx == -1:
+            return ""
+        snippet = text[idx:].strip()
+        return snippet.splitlines()[0].strip()
+
+    @staticmethod
+    def _local_golden_rule(failures: List[Dict[str, Any]], fix: str) -> str:
+        if failures:
+            entry = failures[0]
+            section = entry.get("section") or "workflow"
+            command = entry.get("command") or ""
+            if command:
+                return f"Golden Rule: Always re-run `{command}` and document the exact failure output in the {section} report."
+        if fix:
+            return "Golden Rule: Re-run the failing command after each fix and record the exact outcome in the test report."
+        return ""
+
+    def _invoke_review_tool(
+        self,
+        *,
+        tool: str,
+        prompt: str,
+        repo_path: str | None,
+        branch: str | None,
+        phase_name: str,
+    ) -> str:
+        if tool == "gemini":
+            return request_gemini(prompt, repo_path=repo_path, branch=branch, phase=phase_name)
+        if tool == "codex":
+            return request_codex(prompt, repo_path=repo_path, branch=branch, phase=phase_name)
+        return ""
+
+    def _distill_lesson(
+        self,
+        phase_name: str,
+        failures: List[Dict[str, Any]],
+        fix: str,
+        *,
+        review_tool: str,
+        fallback_review_tool: str,
+        repo_path: str | None,
+        branch: str | None,
+    ) -> str:
+        """Turn a noisy debugging session into a concise lesson."""
+        if not self.memory_store:
+            return ""
+        error_log = self._format_failure_summary(failures)
+        fallback_rule = self._local_golden_rule(failures, fix)
+        prompt = (
+            "Analyze this debugging session.\n"
+            f"Context: {phase_name}\n"
+            f"Error Log: {error_log[:2000]}\n"
+            f"Successful Fix: {fix[:2000]}\n\n"
+            "Extract a single, standalone 'Golden Rule' for future agents working on this codebase.\n"
+            "The rule must be under 30 words, actionable, and specific.\n"
+            "Format: 'Golden Rule: <rule>'\n"
+            "Example: 'Golden Rule: Always run npm run build:css before starting the server.'"
+        )
+        for tool in [review_tool, fallback_review_tool]:
+            if not tool:
+                continue
+            try:
+                result = self._invoke_review_tool(
+                    tool=tool,
+                    prompt=prompt,
+                    repo_path=repo_path,
+                    branch=branch,
+                    phase_name=phase_name,
+                )
+            except Exception as exc:
+                console.log(f"[red]Scribe failed ({tool})[/] {exc}")
+                continue
+            if self._review_result_ok(result):
+                rule = self._extract_golden_rule(result)
+                if rule:
+                    return rule
+        return fallback_rule
+
     def _fallback_plan(self, query: str) -> str:
         steps = [
             f"1. Interpret task: {query}",
@@ -504,7 +660,7 @@ class LangChainAgentNode:
         workspace = resolve_repo_workspace(repo_path=repo_path, repo_url=repo_url)
         return workspace, prep_log
 
-    def _invoke_codex(
+    def _invoke_coding_tool(
         self,
         *,
         phase_idx: int,
@@ -516,6 +672,7 @@ class LangChainAgentNode:
         session_name: str | None,
         phase_name: str | None,
         instruction: str | None = None,
+        coding_tool: str = "codex",
     ) -> str:
         instruction = instruction or self._format_phase_instruction(
             phase_idx,
@@ -525,6 +682,15 @@ class LangChainAgentNode:
             branch,
         )
         try:
+            if coding_tool == "gemini":
+                return request_gemini(
+                    instruction,
+                    repo_path=repo_path,
+                    branch=branch,
+                    session_id=session_id,
+                    session_name=session_name,
+                    phase=phase_name,
+                )
             return request_codex(
                 instruction,
                 repo_path=repo_path,
@@ -534,8 +700,8 @@ class LangChainAgentNode:
                 phase=phase_name,
             )
         except Exception as exc:  # pragma: no cover - defensive fallback
-            console.log(f"[red]Codex bridge error[/] {exc}")
-            return f"[codex] error: {exc}"
+            console.log(f"[red]Coding tool error ({coding_tool})[/] {exc}")
+            return f"[{coding_tool}] error: {exc}"
 
     def _format_phase_instruction(
         self,
@@ -629,6 +795,17 @@ class LangChainAgentNode:
             lines.append(
                 "Please implement this phase, run relevant tests, and ensure outputs align with guardrails."
             )
+        if self.memory_store and repo_path:
+            query = f"golden rule {phase.get('name', '')} {repo_path}"
+            lessons = self.memory_store.search(query, top_k=3)
+            golden_rules = [
+                item["text"]
+                for item in lessons
+                if item.get("category") == "golden_rule" and item.get("score", 0) > 0.5
+            ]
+            if golden_rules:
+                lines.append("\nPROJECT HANDBOOK (CRITICAL):")
+                lines.extend(f"- {rule}" for rule in golden_rules)
         return "\n".join(lines)
 
     @staticmethod
@@ -688,7 +865,7 @@ class LangChainAgentNode:
                 continue
             normalized = "completed" if status == "executed" else str(status)
             statuses[phase] = normalized
-        for call in phase_exec.get("codex_calls", []):
+        for call in phase_exec.get("tool_calls", []):
             phase = call.get("phase")
             if not phase or phase in statuses:
                 continue
@@ -766,6 +943,7 @@ class LangChainAgentNode:
         *,
         repo_path: str | None,
         branch: str | None,
+        coding_tool: str = "codex",
     ) -> None:
         role_prompt = (role_prompt or "").strip()
         if not role_prompt:
@@ -780,13 +958,18 @@ class LangChainAgentNode:
                 "Reply with a short acknowledgement. Await the next task.",
             ]
         )
-        result = request_codex(
-            init_payload,
+        # We pass minimal dummy args for phase_idx/phase as they aren't used for simple session init
+        result = self._invoke_coding_tool(
+            phase_idx=0,
+            phase={},
+            feature_request="",
             repo_path=repo_path,
             branch=branch,
             session_id=session["id"],
             session_name=session["name"],
-            phase=phase_name,
+            phase_name=phase_name,
+            instruction=init_payload,
+            coding_tool=coding_tool,
         )
         session_inits[phase_name] = {"session_id": session["id"], "result": result}
 
