@@ -7,3 +7,4 @@ data/qdrant/
 data/memory/checkpointer.sqlite
 data/trajectories/*.json
 data/memory/vectorstore/memories.jsonl
+data/context/*.local.json

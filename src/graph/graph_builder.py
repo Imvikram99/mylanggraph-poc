@@ -23,6 +23,10 @@ from .nodes import (
     ImplementationPlannerNode,
     LangChainAgentNode,
     LeadPlannerNode,
+    ContextLoadNode,
+    ContextWriteNode,
+    EvidenceGateNode,
+    ValidationNode,
     MemoryRetrieveNode,
     MemoryWriteNode,
     PlanningResumeNode,
@@ -108,6 +112,12 @@ def build_agent_graph(
     summarizer = ConversationSummaryNode()
     evaluator = EvaluatorNode()
     langchain_agent = LangChainAgentNode(workflow_config, memory_store=memory_store)
+    context_load_planning = ContextLoadNode(config, mode="planning", memory_store=memory_store)
+    context_load_implementation = ContextLoadNode(config, mode="implementation", memory_store=memory_store)
+    context_write_planning = ContextWriteNode(config, mode="planning")
+    context_write_implementation = ContextWriteNode(config, mode="implementation")
+    context_validate = ValidationNode(config, mode="implementation")
+    context_evidence_gate = EvidenceGateNode(config)
     workflow_selector = WorkflowSelectorNode(workflow_config)
     planning_resume = PlanningResumeNode(workflow_config)
     product_owner = ProductOwnerNode(workflow_config)
@@ -139,6 +149,12 @@ def build_agent_graph(
     graph.add_node("hybrid", wrap("hybrid", hybrid.run))
     graph.add_node("skills", wrap("skills", skills_with_retry.run))
     graph.add_node("langchain_agent", wrap("langchain_agent", langchain_agent.run))
+    graph.add_node("context_load_planning", wrap("context_load_planning", context_load_planning.run))
+    graph.add_node("context_load_implementation", wrap("context_load_implementation", context_load_implementation.run))
+    graph.add_node("context_write_planning", wrap("context_write_planning", context_write_planning.run))
+    graph.add_node("context_write_implementation", wrap("context_write_implementation", context_write_implementation.run))
+    graph.add_node("context_validate", wrap("context_validate", context_validate.run))
+    graph.add_node("context_evidence_gate", wrap("context_evidence_gate", context_evidence_gate.run))
     graph.add_node("handoff", wrap("handoff", handoff.run))
     graph.add_node("swarm", wrap("swarm", swarm.run))
     graph.add_node("evaluator", wrap("evaluator", evaluator.run))
@@ -170,8 +186,8 @@ def build_agent_graph(
             "handoff": "handoff",
             "swarm": "swarm",
             "hybrid": "hybrid",
-            "langchain_agent": "langchain_agent",
-            "workflow": "workflow_selector",
+            "langchain_agent": "context_load_implementation",
+            "workflow": "context_load_planning",
         },
     )
 
@@ -180,6 +196,7 @@ def build_agent_graph(
     graph.add_edge("handoff", "swarm")
     graph.add_edge("swarm", "evaluator")
     graph.add_edge("hybrid", "evaluator")
+    graph.add_edge("context_load_planning", "workflow_selector")
     graph.add_conditional_edges(
         "workflow_selector",
         lambda state: "planning_resume"
@@ -220,10 +237,10 @@ def build_agent_graph(
     graph.add_edge("tech_lead", "implementation_planner")
     graph.add_conditional_edges(
         "implementation_planner",
-        lambda state: "langchain_agent"
+        lambda state: "context_load_implementation"
         if _workflow_mode_from_state(state) == "debugandverify"
         else "plan_validator",
-        {"langchain_agent": "langchain_agent", "plan_validator": "plan_validator"},
+        {"context_load_implementation": "context_load_implementation", "plan_validator": "plan_validator"},
     )
     graph.add_conditional_edges(
         "plan_validator",
@@ -233,8 +250,12 @@ def build_agent_graph(
             "ok": "plan_summary",
         },
     )
-    graph.add_edge("plan_summary", "langchain_agent")
-    graph.add_edge("langchain_agent", "code_review")
+    graph.add_edge("plan_summary", "context_write_planning")
+    graph.add_edge("context_write_planning", "context_load_implementation")
+    graph.add_edge("context_load_implementation", "context_validate")
+    graph.add_edge("context_validate", "langchain_agent")
+    graph.add_edge("langchain_agent", "context_evidence_gate")
+    graph.add_edge("context_evidence_gate", "code_review")
     graph.add_edge("code_review", "evaluator")
 
     graph.add_conditional_edges(
@@ -245,7 +266,8 @@ def build_agent_graph(
             "fallback": "rag",
         },
     )
-    graph.add_edge("evaluator", "memory_write")
+    graph.add_edge("evaluator", "context_write_implementation")
+    graph.add_edge("context_write_implementation", "memory_write")
     graph.add_edge("memory_write", END)
 
     interrupt_nodes = ["handoff", "swarm"]

@@ -1,0 +1,26 @@
+prompt: Ship the test endpoint in tution-teacher
+context:
+  persona: architect
+  mode: architect
+  stack: LangGraph POC
+  scenario_id: feature_request
+  workflow_mode: planning
+  force_rerun: true
+  coding_tool: gemini
+  review_tool: gemini
+  fallback_review_tool: codex
+  shared_context: true
+  workflow_resume: false
+  deadline: '2026-01-31'
+  repo_path: /Users/apple/Documents/vikram_workspace/spring-boot/brbhr/tution-teacher
+  target_branch: feature/test2
+  feature_request: API smoke test
+  plan_only: true
+assertions:
+- type: metadata
+  path:
+  - metadata
+  - router_reason
+  equals: workflow_request
+- type: contains
+  value: Architecture plan drafted

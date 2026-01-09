@@ -79,6 +79,18 @@ def _last_user_message(state: Dict[str, Any]) -> str:
     return ""
 
 
+def _resolve_context_bundle(plan: Dict[str, Any], mode: str) -> str | None:
+    metadata = plan.get("metadata") or {}
+    if not metadata.get("shared_context_enabled"):
+        return None
+    bundles = metadata.get("context_bundle") or {}
+    shared = metadata.get("shared_context") or {}
+    if bundles.get(mode):
+        return bundles.get(mode)
+    entry = shared.get(mode) or {}
+    return entry.get("bundle")
+
+
 def _dispatch_codex(
     plan: Dict[str, Any],
     phase: str,
@@ -102,6 +114,10 @@ def _dispatch_codex(
     lines = []
     if role_prompt:
         lines.append(f"Role prompt: {role_prompt.strip()}")
+    bundle = _resolve_context_bundle(plan, "planning")
+    if bundle:
+        lines.append("Context Bundle:")
+        lines.extend(bundle.splitlines())
     lines.extend(
         [
             f"Feature request: {request_name}",
@@ -161,6 +177,10 @@ def _dispatch_gemini(
     lines = []
     if role_prompt:
         lines.append(f"Role prompt: {role_prompt.strip()}")
+    bundle = _resolve_context_bundle(plan, "planning")
+    if bundle:
+        lines.append("Context Bundle:")
+        lines.extend(bundle.splitlines())
     lines.extend(
         [
             f"Feature request: {request_name}",

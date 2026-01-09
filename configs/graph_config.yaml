@@ -9,6 +9,9 @@ defaults:
     top_k: ${MEMORY_TOP_K:-8}
     ttl_task_days: ${MEMORY_TTL_TASK_DAYS:-7}
 
+shared_context:
+  enabled: ${SHARED_CONTEXT_ENABLED:-false}
+
 agents:
   researcher:
     skills: [research_pack]

@@ -248,7 +248,7 @@ def _stream_run(graph, state: Dict[str, Any], run_config: Dict[str, Any]):
         return final_state
     except Exception:  # pragma: no cover - fallback when stream unsupported
         console.log("[yellow]Graph streaming unavailable; falling back to invoke().[/]")
-        return graph.invoke(state, config={"metadata": metadata})
+        return graph.invoke(state, config=run_config)
 
 
 def _normalize_event(event):

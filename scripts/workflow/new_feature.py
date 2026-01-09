@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -50,6 +51,8 @@ def _build_scenario(
     coding_tool: str = "codex",
     review_tool: str = "gemini",
     fallback_review_tool: str = "codex",
+    shared_context_enabled: Optional[bool] = None,
+    workflow_resume: Optional[bool] = None,
 ) -> dict:
     workflow_mode = _normalize_workflow_mode(workflow_mode)
     context = {
@@ -63,6 +66,10 @@ def _build_scenario(
         "review_tool": review_tool,
         "fallback_review_tool": fallback_review_tool,
     }
+    if shared_context_enabled is not None:
+        context["shared_context"] = shared_context_enabled
+    if workflow_resume is not None:
+        context["workflow_resume"] = workflow_resume
     if deadline:
         context["deadline"] = deadline
     if repo:
@@ -142,6 +149,16 @@ def create(
         "--fallback-review-tool",
         help="Fallback review tool when review-tool fails.",
     ),
+    shared_context_enabled: Optional[bool] = typer.Option(
+        None,
+        "--shared-context-enabled/--no-shared-context-enabled",
+        help="Enable shared context store and bundle injection.",
+    ),
+    workflow_resume: Optional[bool] = typer.Option(
+        None,
+        "--workflow-resume/--no-workflow-resume",
+        help="Enable resume from checkpoints (WORKFLOW_RESUME).",
+    ),
 ):
     """Create a scenario YAML with the workflow context pre-populated."""
     scenario = _build_scenario(
@@ -159,6 +176,8 @@ def create(
         coding_tool=coding_tool,
         review_tool=review_tool,
         fallback_review_tool=fallback_review_tool,
+        shared_context_enabled=shared_context_enabled,
+        workflow_resume=workflow_resume,
     )
     _write_scenario(scenario, output)
     typer.secho(f"Scenario written to {output}", fg=typer.colors.GREEN)
@@ -199,6 +218,16 @@ def run_feature(
         "--fallback-review-tool",
         help="Fallback review tool when review-tool fails.",
     ),
+    shared_context_enabled: Optional[bool] = typer.Option(
+        None,
+        "--shared-context-enabled/--no-shared-context-enabled",
+        help="Enable shared context store and bundle injection.",
+    ),
+    workflow_resume: Optional[bool] = typer.Option(
+        None,
+        "--workflow-resume/--no-workflow-resume",
+        help="Enable resume from checkpoints (WORKFLOW_RESUME).",
+    ),
 ):
     """Create and immediately run a feature workflow scenario."""
     scenario = _build_scenario(
@@ -217,7 +246,13 @@ def run_feature(
         coding_tool,
         review_tool,
         fallback_review_tool,
+        shared_context_enabled,
+        workflow_resume,
     )
+    if shared_context_enabled is not None:
+        os.environ["SHARED_CONTEXT_ENABLED"] = "true" if shared_context_enabled else "false"
+    if workflow_resume is not None:
+        os.environ["WORKFLOW_RESUME"] = "true" if workflow_resume else "false"
     if save:
         _write_scenario(scenario, save)
         typer.secho(f"Scenario written to {save}", fg=typer.colors.BLUE)

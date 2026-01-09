@@ -48,6 +48,12 @@ class LangChainAgentNode:
         plan = state.get("plan") or {}
         phases = plan.get("phases") or []
         context = state.get("context") or {}
+        if context.get("validation_block"):
+            reason = context.get("validation_reason", "Validation failed; missing evidence.")
+            state.setdefault("messages", []).append({"role": "system", "content": reason})
+            state["output"] = reason
+            console.log("[red]LangChainAgent[/] blocked by validation")
+            return state
         plan_only = context.get("plan_only") or plan.get("metadata", {}).get("plan_only")
         if phases:
             if plan_only:
@@ -90,12 +96,14 @@ class LangChainAgentNode:
 
     def _execute_phases(self, state: Dict[str, Any], phases: List[Dict[str, Any]]) -> Dict[str, Any]:
         metadata = state.setdefault("metadata", {})
+        context = state.get("context") or {}
         phase_outputs = []
         checkpoints = state.setdefault("checkpoints", [])
         repo_workspace, prep_log = self._prepare_repo_workspace(state)
         phase_exec = metadata.setdefault("phase_execution", {})
         phase_statuses = phase_exec.setdefault("phase_statuses", {})
         resume_enabled = bool((state.get("context") or {}).get("resume"))
+        context_bundle = _resolve_context_bundle(state, "implementation")
         if resume_enabled and not phase_statuses:
             phase_statuses.update(self._derive_phase_statuses(phase_exec, checkpoints))
         completed_phases = {
@@ -181,6 +189,7 @@ class LangChainAgentNode:
                 plan_request,
                 repo_ref,
                 repo_branch,
+                context_bundle=context_bundle,
             )
             test_policy = str(phase.get("test_policy") or "").strip().lower()
             if repo_ref and test_policy == "debugger":
@@ -673,6 +682,7 @@ class LangChainAgentNode:
         phase_name: str | None,
         instruction: str | None = None,
         coding_tool: str = "codex",
+        context_bundle: str | None = None,
     ) -> str:
         instruction = instruction or self._format_phase_instruction(
             phase_idx,
@@ -680,6 +690,7 @@ class LangChainAgentNode:
             feature_request,
             repo_path,
             branch,
+            context_bundle=context_bundle,
         )
         try:
             if coding_tool == "gemini":
@@ -710,6 +721,8 @@ class LangChainAgentNode:
         feature_request: str,
         repo_path: str | None,
         branch: str | None,
+        *,
+        context_bundle: str | None = None,
     ) -> str:
         name = phase.get("name") or f"Phase {idx}"
         owners = self._phase_owners(phase)
@@ -730,8 +743,11 @@ class LangChainAgentNode:
             f"Phase: {name}",
             f"Repo: {repo_path or 'unspecified'}",
             f"Branch: {branch or 'current'}",
-            "Deliverables:",
         ]
+        if context_bundle:
+            lines.append("Context Bundle:")
+            lines.extend(context_bundle.splitlines())
+        lines.append("Deliverables:")
         if deliverables:
             lines.extend(f"- {item}" for item in deliverables)
         else:
@@ -1123,3 +1139,14 @@ def _last_user_content(messages: List[Dict[str, Any]]) -> str:
         if message.get("role") == "user":
             return str(message.get("content", ""))
     return ""
+
+
+def _resolve_context_bundle(state: Dict[str, Any], mode: str) -> str | None:
+    plan = state.get("plan") or {}
+    metadata = plan.get("metadata") or {}
+    bundles = metadata.get("context_bundle") or {}
+    context = state.get("context") or {}
+    if not context.get("shared_context_enabled"):
+        return None
+    context_bundles = context.get("context_bundle") or {}
+    return bundles.get(mode) or context_bundles.get(mode)
